@@ -3535,7 +3535,7 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                            getDllimportSymbol(G, SDLoc(G), Ty, DAG), PtrInfo);
     } else if (IsPIC) {
       const GlobalValue *Val = G->getGlobal();
-      InternalLinkage = Val->hasInternalLinkage();
+      InternalLinkage = Val->hasLocalLinkage();
 
       if (InternalLinkage)
         Callee = getAddrLocal(G, DL, Ty, DAG, ABI.IsN32() || ABI.IsN64());
