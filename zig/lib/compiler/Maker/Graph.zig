@@ -17,6 +17,7 @@ global_cache_root: Directory,
 local_cache_root: Directory,
 zig_lib_directory: Directory,
 build_root_directory: Directory,
+host_target: std.Target,
 
 debug_compiler_runtime_libs: ?std.builtin.Optimize = null,
 incremental: ?bool = null,
@@ -32,11 +33,8 @@ debug_compile_errors: bool = false,
 debug_incremental: bool = false,
 fuzzing: bool = false,
 verbose: bool = false,
-verbose_air: bool = false,
 verbose_cc: bool = false,
 verbose_link: bool = false,
-verbose_llvm_cpu_features: bool = false,
-verbose_llvm_ir: bool = false,
 libc_file: ?[]const u8 = null,
 /// What does this do? Nobody bothered to document it, and I think it's a
 /// smelly option. So unless somebody deletes these passive aggressive comments
@@ -73,12 +71,12 @@ pub fn handleVerbose(
     argv: []const []const u8,
 ) error{OutOfMemory}!void {
     if (!graph.verbose) return;
-    const arena = graph.arena;
-    const text = try std.zig.allocPrintCmd(arena, argv, .{
-        .cwd = cwd,
-        .parent_env = &graph.environ_map,
-        .child_env = opt_env,
+    std.log.scoped(.verbose).info("{f}", .{
+        std.zig.SubprocessCommand{
+            .argv = argv,
+            .cwd = cwd,
+            .child_env = opt_env,
+            .parent_env = &graph.environ_map,
+        },
     });
-    defer arena.free(text);
-    std.log.scoped(.verbose).info("{s}", .{text});
 }

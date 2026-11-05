@@ -84,6 +84,7 @@ const ResultCacheStatus = union(enum) {
     incomplete_manifest,
     invalid_manifest,
     path_deleted: [*:0]const u8,
+    path_created: [*:0]const u8,
     directory_status_changed: [*:0]const u8,
     metadata_changed: [*:0]const u8,
     contents_changed: [*:0]const u8,
@@ -313,8 +314,7 @@ pub fn make(
 
     const max_rss = conf_step.max_rss.toBytes();
     if (max_rss != 0 and s.result_peak_rss > max_rss) {
-        if (std.fmt.allocPrint(
-            arena,
+        if (arena.print(
             "memory usage peaked at {0B:.2} ({0d} bytes), exceeding the declared upper bound of {1B:.2} ({1d} bytes)",
             .{ s.result_peak_rss, max_rss },
         )) |msg| {
@@ -429,7 +429,12 @@ pub fn setFailedCommand(
     options: std.zig.AllocPrintCmdOptions,
 ) void {
     s.clearFailedCommand(gpa);
-    s.result_failed_command = std.zig.allocPrintCmd(gpa, argv, options) catch |err| switch (err) {
+    s.result_failed_command = gpa.print("{f}", .{std.zig.SubprocessCommand{
+        .argv = argv,
+        .cwd = options.cwd,
+        .child_env = options.child_env,
+        .parent_env = options.parent_env,
+    }}) catch |err| switch (err) {
         error.OutOfMemory => {
             s.result_oom = true;
             return;
@@ -447,7 +452,7 @@ pub fn fail(step: *Step, maker: *const Maker, comptime fmt: []const u8, args: an
 pub fn addError(step: *Step, maker: *const Maker, comptime fmt: []const u8, args: anytype) error{OutOfMemory}!void {
     const graph = maker.graph;
     const arena = graph.arena; // TODO don't leak into the process_arena
-    const msg = try std.fmt.allocPrint(arena, fmt, args);
+    const msg = try arena.print(fmt, args);
     try step.result_error_msgs.append(arena, msg);
 }
 
@@ -782,7 +787,7 @@ pub inline fn handleChildProcUnsupported(s: *Step, maker: *Maker) FailError!void
 }
 
 pub fn handleChildProcessTerm(s: *Step, maker: *Maker, term: std.process.Child.Term) FailError!void {
-    if (!term.success()) return s.fail(maker, "process {f}", .{term});
+    if (!term.eql(.success)) return s.fail(maker, "process {f}", .{term});
 }
 
 /// Prefer `cacheHitWatched` unless you already added watch inputs
@@ -815,7 +820,13 @@ fn setResultCacheStatus(s: *Step, man: *const Cache.Manifest, status: Cache.Mani
         .hit => .hit,
         .incomplete_manifest => .incomplete_manifest,
         .invalid_manifest => .invalid_manifest,
-        inline .path_deleted, .directory_status_changed, .metadata_changed, .contents_changed => |off, tag| @unionInit(
+
+        inline .path_created,
+        .path_deleted,
+        .directory_status_changed,
+        .metadata_changed,
+        .contents_changed,
+        => |off, tag| @unionInit(
             ResultCacheStatus,
             @tagName(tag),
             try gpa.dupeSentinel(u8, off.path(man.contents.items), 0),
@@ -827,7 +838,13 @@ fn setResultCacheStatus(s: *Step, man: *const Cache.Manifest, status: Cache.Mani
 fn clearResultCacheStatus(s: *Step, gpa: Allocator) void {
     switch (s.result_cache_status) {
         .hit, .incomplete_manifest, .invalid_manifest => {},
-        .path_deleted, .directory_status_changed, .metadata_changed, .contents_changed => |path| {
+
+        .path_created,
+        .path_deleted,
+        .directory_status_changed,
+        .metadata_changed,
+        .contents_changed,
+        => |path| {
             gpa.free(std.mem.sliceTo(path, 0));
         },
     }

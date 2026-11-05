@@ -41,10 +41,10 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
 
     switch (crt_file) {
         .crt2_o => {
-            var args = std.array_list.Managed([]const u8).init(arena);
+            var args: std.ArrayList([]const u8) = .empty;
             try addCrtCcArgs(comp, arena, &args);
             if (comp.mingw_unicode_entry_point) {
-                try args.appendSlice(&.{ "-DUNICODE", "-D_UNICODE" });
+                try args.appendSlice(arena, &.{ "-DUNICODE", "-D_UNICODE" });
             }
             var files = [_]Compilation.CSourceFile{
                 .{
@@ -61,7 +61,7 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
         },
 
         .dllcrt2_o => {
-            var args = std.array_list.Managed([]const u8).init(arena);
+            var args: std.ArrayList([]const u8) = .empty;
             try addCrtCcArgs(comp, arena, &args);
             var files = [_]Compilation.CSourceFile{
                 .{
@@ -76,14 +76,14 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
         },
 
         .libmingw32_lib => {
-            var c_source_files = std.array_list.Managed(Compilation.CSourceFile).init(arena);
+            var c_source_files: std.ArrayList(Compilation.CSourceFile) = .empty;
 
             {
-                var crt_args = std.array_list.Managed([]const u8).init(arena);
+                var crt_args: std.ArrayList([]const u8) = .empty;
                 try addCrtCcArgs(comp, arena, &crt_args);
 
                 for (mingw32_generic_src) |dep| {
-                    try c_source_files.append(.{
+                    try c_source_files.append(arena, .{
                         .src_path = try comp.dirs.zig_lib.join(arena, &.{
                             "libc", "mingw", dep,
                         }),
@@ -93,7 +93,7 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
                 }
                 if (target.cpu.arch.isX86()) {
                     for (mingw32_x86_src) |dep| {
-                        try c_source_files.append(.{
+                        try c_source_files.append(arena, .{
                             .src_path = try comp.dirs.zig_lib.join(arena, &.{
                                 "libc", "mingw", dep,
                             }),
@@ -103,7 +103,7 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
                     }
                     if (target.cpu.arch == .x86) {
                         for (mingw32_x86_32_src) |dep| {
-                            try c_source_files.append(.{
+                            try c_source_files.append(arena, .{
                                 .src_path = try comp.dirs.zig_lib.join(arena, &.{
                                     "libc", "mingw", dep,
                                 }),
@@ -114,7 +114,7 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
                     }
                 } else if (target.cpu.arch == .thumb or target.cpu.arch == .aarch64) {
                     for (mingw32_arm_src) |dep| {
-                        try c_source_files.append(.{
+                        try c_source_files.append(arena, .{
                             .src_path = try comp.dirs.zig_lib.join(arena, &.{
                                 "libc", "mingw", dep,
                             }),
@@ -128,19 +128,19 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
             }
 
             {
-                var winpthreads_args = std.array_list.Managed([]const u8).init(arena);
+                var winpthreads_args: std.ArrayList([]const u8) = .empty;
                 try addCcArgs(comp, arena, &winpthreads_args);
-                try winpthreads_args.appendSlice(&[_][]const u8{
+                try winpthreads_args.appendSlice(arena, &[_][]const u8{
                     "-DIN_WINPTHREAD",
                 });
 
                 switch (comp.compilerRtOptMode()) {
-                    .debug, .safe => try winpthreads_args.append("-DWINPTHREAD_DBG"),
+                    .debug, .safe => try winpthreads_args.append(arena, "-DWINPTHREAD_DBG"),
                     .fast, .small => {},
                 }
 
                 for (mingw32_winpthreads_src) |dep| {
-                    try c_source_files.append(.{
+                    try c_source_files.append(arena, .{
                         .src_path = try comp.dirs.zig_lib.join(arena, &.{
                             "libc", "mingw", dep,
                         }),
@@ -161,9 +161,10 @@ pub fn buildCrtFile(comp: *Compilation, crt_file: CrtFile, prog_node: std.Progre
 fn addCcArgs(
     comp: *Compilation,
     arena: Allocator,
-    args: *std.array_list.Managed([]const u8),
+    /// uses `arena` as its allocator
+    args: *std.ArrayList([]const u8),
 ) error{OutOfMemory}!void {
-    try args.appendSlice(&[_][]const u8{
+    try args.appendSlice(arena, &[_][]const u8{
         "-w", // Disable all warnings.
         "-std=gnu11",
         "-D__USE_MINGW_ANSI_STDIO=0",
@@ -176,15 +177,16 @@ fn addCcArgs(
 fn addCrtCcArgs(
     comp: *Compilation,
     arena: Allocator,
-    args: *std.array_list.Managed([]const u8),
+    /// uses `arena` as its allocator
+    args: *std.ArrayList([]const u8),
 ) error{OutOfMemory}!void {
     try addCcArgs(comp, arena, args);
 
     if (comp.getTarget().cpu.arch == .thumb) {
-        try args.append("-mfpu=vfp");
+        try args.append(arena, "-mfpu=vfp");
     }
 
-    try args.appendSlice(&[_][]const u8{
+    try args.appendSlice(arena, &[_][]const u8{
         // According to Martin Storsjö,
         // > the files under mingw-w64-crt are designed to always
         // be built with __MSVCRT_VERSION__=0x700
@@ -215,15 +217,17 @@ pub fn buildImportLib(comp: *Compilation, lib_name: []const u8, prog_node: std.P
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    const def_file_path: Cache.Path = .{
-        .root_dir = comp.dirs.zig_lib,
-        .sub_path = findDef(arena, io, comp.getTarget(), comp.dirs.zig_lib, lib_name) catch |err| switch (err) {
-            error.FileNotFound => return error.DefNotFound,
-            else => |e| return e,
-        },
-    };
-    // Only .def.in files need preprocessing
-    const def_needs_preprocessing = mem.endsWith(u8, def_file_path.sub_path, ".def.in");
+    const def_names: []const []const u8 = merged_import_libs.get(lib_name) orelse (&lib_name)[0..1];
+    const def_file_paths = try arena.alloc(Cache.Path, def_names.len);
+    for (def_file_paths, def_names) |*def_file_path, def_name| {
+        def_file_path.* = .{
+            .root_dir = comp.dirs.zig_lib,
+            .sub_path = findDef(arena, io, comp.getTarget(), comp.dirs.zig_lib, def_name) catch |err| switch (err) {
+                error.FileNotFound => return error.DefNotFound,
+                else => |e| return e,
+            },
+        };
+    }
 
     const target = comp.getTarget();
 
@@ -242,13 +246,16 @@ pub fn buildImportLib(comp: *Compilation, lib_name: []const u8, prog_node: std.P
     cache.hash.addBytes(build_options.version);
     cache.hash.addOptionalBytes(comp.dirs.zig_lib.path);
     cache.hash.add(target.cpu.arch);
+    cache.hash.addBytes(lib_name);
 
     var man = cache.obtain();
     defer man.deinit();
 
-    _ = try man.addInputPath(def_file_path, .{});
+    for (def_file_paths) |def_file_path| {
+        _ = try man.addInputPath(def_file_path, .{});
+    }
 
-    const final_lib_basename = try std.fmt.allocPrint(gpa, "{s}.lib", .{lib_name});
+    const final_lib_basename = try gpa.print("{s}.lib", .{lib_name});
     errdefer gpa.free(final_lib_basename);
 
     var diag: Cache.Manifest.CheckDiagnostic = undefined;
@@ -293,54 +300,60 @@ pub fn buildImportLib(comp: *Compilation, lib_name: []const u8, prog_node: std.P
         .sub_path = "libc" ++ sep ++ "mingw" ++ sep ++ "def-include",
     };
 
-    const members = members: {
+    var members: implib.Members = .{ .arena = .init(gpa) };
+    defer members.deinit();
+    {
         const members_node = sub_node.start("Members", 0);
         defer members_node.end();
 
-        const input = switch (def_needs_preprocessing) {
-            true => pp: {
-                var aw: Io.Writer.Allocating = .init(gpa);
-                errdefer aw.deinit();
-
-                var pp_arena = std.heap.ArenaAllocator.init(gpa);
-                defer pp_arena.deinit();
-                var pp: Preprocessor = .{
-                    .io = io,
-                    .arena = pp_arena.allocator(),
-                    .include_dir = include_dir,
-                    .target = target,
-                };
-                try pp.preprocess(def_file_path);
-                try pp.prettyPrintTokens(&aw.writer);
-
-                break :pp try aw.toOwnedSliceSentinel(0);
-            },
-            false => try def_file_path.root_dir.handle.readFileAllocOptions(io, def_file_path.sub_path, gpa, .unlimited, .of(u8), 0),
-        };
-        defer gpa.free(input);
-
         const machine_type = target.toCoffMachine();
-        var def_diagnostics: def.Diagnostics = undefined;
-        var module_def = def.parse(gpa, input, machine_type, .mingw, &def_diagnostics) catch |err| switch (err) {
-            error.OutOfMemory => |e| return e,
-            error.ParseError => {
-                var buffer: [64]u8 = undefined;
-                const stderr = try io.lockStderr(&buffer, null);
-                defer io.unlockStderr();
-                const w = &stderr.file_writer.interface;
-                try w.writeAll("error: ");
-                try def_diagnostics.writeMsg(w, input);
-                try w.writeByte('\n');
-                return error.WritingImportLibFailed;
-            },
-        };
-        defer module_def.deinit();
+        for (def_file_paths) |def_file_path| {
+            // Only .def.in files need preprocessing
+            const def_needs_preprocessing = mem.endsWith(u8, def_file_path.sub_path, ".def.in");
 
-        module_def.fixupForImportLibraryGeneration(machine_type);
+            const input = switch (def_needs_preprocessing) {
+                true => pp: {
+                    var aw: Io.Writer.Allocating = .init(gpa);
+                    errdefer aw.deinit();
 
-        break :members try implib.getMembers(gpa, module_def, machine_type);
-    };
-    defer members.deinit();
+                    var pp_arena = std.heap.ArenaAllocator.init(gpa);
+                    defer pp_arena.deinit();
+                    var pp: Preprocessor = .{
+                        .io = io,
+                        .arena = pp_arena.allocator(),
+                        .include_dir = include_dir,
+                        .target = target,
+                    };
+                    try pp.preprocess(def_file_path);
+                    try pp.prettyPrintTokens(&aw.writer);
+
+                    break :pp try aw.toOwnedSliceSentinel(0);
+                },
+                false => try def_file_path.root_dir.handle.readFileAllocOptions(io, def_file_path.sub_path, gpa, .unlimited, .of(u8), 0),
+            };
+            defer gpa.free(input);
+
+            var def_diagnostics: def.Diagnostics = undefined;
+            var module_def = def.parse(gpa, input, machine_type, .mingw, &def_diagnostics) catch |err| switch (err) {
+                error.OutOfMemory => |e| return e,
+                error.ParseError => {
+                    var buffer: [64]u8 = undefined;
+                    const stderr = try io.lockStderr(&buffer, null);
+                    defer io.unlockStderr();
+                    const w = &stderr.file_writer.interface;
+                    try w.writeAll("error: ");
+                    try def_diagnostics.writeMsg(w, input);
+                    try w.writeByte('\n');
+                    return error.WritingImportLibFailed;
+                },
+            };
+            defer module_def.deinit();
+
+            module_def.fixupForImportLibraryGeneration(machine_type);
+
+            try implib.appendMembers(&members, gpa, module_def, machine_type);
+        }
+    }
 
     const lib_final_path = try std.fs.path.join(gpa, &.{ "o", &digest, final_lib_basename });
     errdefer gpa.free(lib_final_path);
@@ -377,13 +390,21 @@ pub fn libExists(
     zig_lib_directory: Cache.Directory,
     lib_name: []const u8,
 ) !bool {
-    const s = findDef(allocator, io, target, zig_lib_directory, lib_name) catch |err| switch (err) {
-        error.FileNotFound => return false,
-        else => |e| return e,
-    };
-    defer allocator.free(s);
+    const def_names: []const []const u8 = merged_import_libs.get(lib_name) orelse (&lib_name)[0..1];
+    for (def_names) |def_name| {
+        const s = findDef(allocator, io, target, zig_lib_directory, def_name) catch |err| switch (err) {
+            error.FileNotFound => return false,
+            else => |e| return e,
+        };
+        allocator.free(s);
+    }
     return true;
 }
+
+const merged_import_libs = std.StaticStringMap([]const []const u8).initComptime(@as(
+    []const struct { []const u8, []const []const u8 },
+    @import("mingw/merged_import_libs.zon"),
+));
 
 /// This function body is verbose but all it does is test 3 different paths and
 /// see if a .def file exists.

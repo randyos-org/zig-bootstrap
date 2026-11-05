@@ -86,22 +86,29 @@ pub const Options = struct {
     target: *const std.Target = &builtin.target,
 };
 
-fn subArchName(target: *const std.Target, comptime family: std.Target.Cpu.Arch.Family, mappings: anytype) ?[]const u8 {
-    inline for (mappings) |mapping| {
-        if (target.cpu.has(family, mapping[0])) return mapping[1];
+fn subArchName(
+    target: *const std.Target,
+    comptime family: std.Target.Cpu.Arch.Family,
+    mappings: []const struct {
+        []const @field(std.Target, @tagName(family)).Feature,
+        []const u8,
+    },
+) ?[]const u8 {
+    for (mappings) |mapping| {
+        if (target.cpu.hasAll(family, mapping[0])) return mapping[1];
     }
 
     return null;
 }
 
 pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const u8 {
-    var llvm_triple = std.array_list.Managed(u8).init(allocator);
-    defer llvm_triple.deinit();
+    var llvm_triple: std.ArrayList(u8) = .empty;
+    defer llvm_triple.deinit(allocator);
 
     const llvm_arch = switch (target.cpu.arch) {
         .arm => "arm",
         .armeb => "armeb",
-        .aarch64 => if (target.abi == .ilp32) "aarch64_32" else "aarch64",
+        .aarch64 => "aarch64",
         .aarch64_be => "aarch64_be",
         .arc => "arc",
         .avr => "avr",
@@ -112,11 +119,28 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .loongarch32 => "loongarch32",
         .loongarch64 => "loongarch64",
         .m68k => "m68k",
-        // MIPS sub-architectures are a bit irregular, so we handle them manually here.
-        .mips => if (target.cpu.has(.mips, .mips32r6)) "mipsisa32r6" else "mips",
-        .mipsel => if (target.cpu.has(.mips, .mips32r6)) "mipsisa32r6el" else "mipsel",
-        .mips64 => if (target.cpu.has(.mips, .mips64r6)) "mipsisa64r6" else "mips64",
-        .mips64el => if (target.cpu.has(.mips, .mips64r6)) "mipsisa64r6el" else "mips64el",
+        .mips,
+        .mipsf32,
+        .mipsf64,
+        .mipsf64n8,
+        .mipsn8,
+        => "mips",
+        .mipsel,
+        .mipsf32el,
+        .mipsf64el,
+        .mipsf64n8el,
+        .mipsn8el,
+        => "mipsel",
+        .mips64,
+        .mips64n8,
+        => "mips64",
+        .mips64el,
+        .mips64n8el,
+        => "mips64el",
+        .mipsr6 => "mipsisa32r6",
+        .mipsr6el => "mipsisa32r6el",
+        .mips64r6 => "mipsisa64r6",
+        .mips64r6el => "mipsisa64r6el",
         .msp430 => "msp430",
         .powerpc => "powerpc",
         .powerpcle => "powerpcle",
@@ -132,7 +156,7 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .s390x => "s390x",
         .thumb => "thumb",
         .thumbeb => "thumbeb",
-        .x86 => "i386",
+        .x86, .x86c16 => "i386",
         .x86_64 => "x86_64",
         .xcore => "xcore",
         .xtensa => "xtensa",
@@ -153,7 +177,6 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .ez80,
         .hppa,
         .hppa64,
-        .kalimba,
         .kvx,
         .m88k,
         .microblaze,
@@ -165,68 +188,79 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .spork8,
         .x86_16,
         .xtensaeb,
+        .z80,
         => unreachable, // Gated by hasLlvmSupport().
     };
 
-    try llvm_triple.appendSlice(llvm_arch);
+    try llvm_triple.appendSlice(allocator, llvm_arch);
 
     const llvm_sub_arch: ?[]const u8 = switch (target.cpu.arch) {
-        .arm, .armeb, .thumb, .thumbeb => subArchName(target, .arm, .{
-            .{ .v4t, "v4t" },
-            .{ .v5t, "v5t" },
-            .{ .v5te, "v5te" },
-            .{ .v5tej, "v5tej" },
-            .{ .v6, "v6" },
-            .{ .v6k, "v6k" },
-            .{ .v6kz, "v6kz" },
-            .{ .v6m, "v6m" },
-            .{ .v6t2, "v6t2" },
-            .{ .v7a, "v7a" },
-            .{ .v7em, "v7em" },
-            .{ .v7m, "v7m" },
-            .{ .v7r, "v7r" },
-            .{ .v7ve, "v7ve" },
-            .{ .v8a, "v8a" },
-            .{ .v8_1a, "v8.1a" },
-            .{ .v8_2a, "v8.2a" },
-            .{ .v8_3a, "v8.3a" },
-            .{ .v8_4a, "v8.4a" },
-            .{ .v8_5a, "v8.5a" },
-            .{ .v8_6a, "v8.6a" },
-            .{ .v8_7a, "v8.7a" },
-            .{ .v8_8a, "v8.8a" },
-            .{ .v8_9a, "v8.9a" },
-            .{ .v8m, "v8m.base" },
-            .{ .v8m_main, "v8m.main" },
-            .{ .v8_1m_main, "v8.1m.main" },
-            .{ .v8r, "v8r" },
-            .{ .v9a, "v9a" },
-            .{ .v9_1a, "v9.1a" },
-            .{ .v9_2a, "v9.2a" },
-            .{ .v9_3a, "v9.3a" },
-            .{ .v9_4a, "v9.4a" },
-            .{ .v9_5a, "v9.5a" },
-            .{ .v9_6a, "v9.6a" },
-            .{ .v9_7a, "v9.7a" },
-        }),
-        .powerpc => subArchName(target, .powerpc, .{
-            .{ .spe, "spe" },
-        }),
-        .spirv32, .spirv64 => subArchName(target, .spirv, .{
-            .{ .v1_6, "1.6" },
-            .{ .v1_5, "1.5" },
-            .{ .v1_4, "1.4" },
-            .{ .v1_3, "1.3" },
-            .{ .v1_2, "1.2" },
-            .{ .v1_1, "1.1" },
+        .arm, .armeb, .thumb, .thumbeb => subArchName(target, .arm, &.{
+            .{ &.{ .rclass, .v8 }, "v8r" },
+            .{ &.{.v9_7a}, "v9.7a" },
+            .{ &.{.v9_6a}, "v9.6a" },
+            .{ &.{.v9_5a}, "v9.5a" },
+            .{ &.{.v9_4a}, "v9.4a" },
+            .{ &.{.v9_3a}, "v9.3a" },
+            .{ &.{.v9_2a}, "v9.2a" },
+            .{ &.{.v9_1a}, "v9.1a" },
+            .{ &.{.v9a}, "v9a" },
+            .{ &.{.v8_9a}, "v8.9a" },
+            .{ &.{.v8_8a}, "v8.8a" },
+            .{ &.{.v8_7a}, "v8.7a" },
+            .{ &.{.v8_6a}, "v8.6a" },
+            .{ &.{.v8_5a}, "v8.5a" },
+            .{ &.{.v8_4a}, "v8.4a" },
+            .{ &.{.v8_3a}, "v8.3a" },
+            .{ &.{.v8_2a}, "v8.2a" },
+            .{ &.{.v8_1a}, "v8.1a" },
+            .{ &.{.v8}, "v8a" },
+            .{ &.{.v8_1m_main}, "v8.1m.main" },
+            .{ &.{.v8m_main}, "v8m.main" },
+            .{ &.{ .mclass, .dsp, .v7 }, "v7em" },
+            .{ &.{ .mclass, .v7 }, "v7m" },
+            .{ &.{ .rclass, .v7 }, "v7r" },
+            .{ &.{ .v7, .virtualization }, "v7ve" },
+            .{ &.{.v7}, "v7a" },
+            .{ &.{.v6t2}, "v6t2" },
+            .{ &.{.v8m}, "v8m.base" },
+            .{ &.{.v6m}, "v6m" },
+            .{ &.{ .trustzone, .v6k }, "v6kz" },
+            .{ &.{.v6k}, "v6k" },
+            .{ &.{.v6}, "v6" },
+            .{ &.{.v5te}, "v5te" },
+            .{ &.{.v5t}, "v5t" },
+            .{ &.{.v4t}, "v4t" },
+        }) orelse "v4",
+        .spirv32 => switch (target.os.tag) {
+            .vulkan, .opengl => subArchName(target, .spirv, &.{
+                .{ &.{.v1_6}, "1.6" },
+                .{ &.{.v1_5}, "1.5" },
+            }),
+            else => subArchName(target, .spirv, &.{
+                .{ &.{.v1_6}, "v1.6" },
+                .{ &.{.v1_5}, "v1.5" },
+                .{ &.{.v1_4}, "v1.4" },
+                .{ &.{.v1_3}, "v1.3" },
+                .{ &.{.v1_2}, "v1.2" },
+                .{ &.{.v1_1}, "v1.1" },
+            }),
+        },
+        .spirv64 => subArchName(target, .spirv, &.{
+            .{ &.{.v1_6}, "v1.6" },
+            .{ &.{.v1_5}, "v1.5" },
+            .{ &.{.v1_4}, "v1.4" },
+            .{ &.{.v1_3}, "v1.3" },
+            .{ &.{.v1_2}, "v1.2" },
+            .{ &.{.v1_1}, "v1.1" },
         }),
         else => null,
     };
 
-    if (llvm_sub_arch) |sub| try llvm_triple.appendSlice(sub);
-    try llvm_triple.append('-');
+    if (llvm_sub_arch) |sub| try llvm_triple.appendSlice(allocator, sub);
+    try llvm_triple.append(allocator, '-');
 
-    try llvm_triple.appendSlice(switch (target.os.tag) {
+    try llvm_triple.appendSlice(allocator, switch (target.os.tag) {
         .driverkit,
         .ios,
         .maccatalyst,
@@ -239,16 +273,13 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .ps5,
         => "scei",
         .amdhsa,
-        .amdpal,
         => "amd",
         .cuda,
         .nvcl,
         => "nvidia",
-        .mesa3d,
-        => "mesa",
         else => "unknown",
     });
-    try llvm_triple.append('-');
+    try llvm_triple.append(allocator, '-');
 
     const llvm_os = switch (target.os.tag) {
         .dragonfly => "dragonfly",
@@ -267,8 +298,6 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .ps3 => "lv2",
         .ps4 => "ps4",
         .ps5 => "ps5",
-        .mesa3d => "mesa3d",
-        .amdpal => "amdpal",
         .hurd => "hurd",
         .wasi => "wasi",
         .emscripten => "emscripten",
@@ -298,66 +327,80 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .ashetos,
         => "unknown",
     };
-    try llvm_triple.appendSlice(llvm_os);
+    try llvm_triple.appendSlice(allocator, llvm_os);
 
     switch (target.os.versionRange()) {
         .none,
         .windows,
         => {},
         .semver => |ver| if (target.os.tag == .wasi and ver.min.major == 0) {
-            try llvm_triple.print("p{d}", .{ver.min.minor});
+            try llvm_triple.print(allocator, "p{d}", .{ver.min.minor});
         } else if (target.os.tag != .amdhsa) {
-            try llvm_triple.print("{d}.{d}.{d}", .{
+            try llvm_triple.print(allocator, "{d}.{d}.{d}", .{
                 ver.min.major,
                 ver.min.minor,
                 ver.min.patch,
             });
         },
-        inline .linux, .hurd => |ver| try llvm_triple.print("{d}.{d}.{d}", .{
+        inline .linux, .hurd => |ver| try llvm_triple.print(allocator, "{d}.{d}.{d}", .{
             ver.range.min.major,
             ver.range.min.minor,
             ver.range.min.patch,
         }),
     }
-    try llvm_triple.append('-');
+    try llvm_triple.append(allocator, '-');
 
     const llvm_abi = switch (target.abi) {
-        .none => if (target.os.tag == .maccatalyst) "macabi" else "unknown",
-        .gnu => "gnu",
-        .gnuabin32 => "gnuabin32",
-        .gnuabi64 => "gnuabi64",
-        .gnueabi => "gnueabi",
-        .gnueabihf => "gnueabihf",
-        .gnuf32 => "gnuf32",
-        .gnusf => "gnusf",
-        .gnux32 => "gnux32",
-        .ilp32 => "unknown",
-        .eabi => "eabi",
-        .eabihf => "eabihf",
-        .abin32 => "unknown",
-        .x32 => "muslx32", // https://github.com/ziglang/zig/issues/25649
+        .none => if (target.cpu.arch.isArm())
+            "eabihf"
+        else if (target.os.tag == .maccatalyst)
+            "macabi"
+        else
+            "unknown",
         .android => "android",
-        .androideabi => "androideabi",
+        .gnu => if (target.cpu.arch.isArm())
+            "gnueabihf"
+        else
+            "gnu",
+        .gnuf32 => "gnuf32",
+        .gnun32, .gnun32sf => "gnuabin32",
+        .gnusf => if (target.cpu.arch.isArm())
+            "gnueabi"
+        else
+            "gnusf",
+        .gnux32 => "gnux32",
+        .msvc => "msvc",
         .musl => switch (target.os.tag) {
             // For WASI/Emscripten, "musl" refers to the libc, not really the ABI.
             // "unknown" provides better compatibility with LLVM-based tooling for these targets.
             .wasi, .emscripten => "unknown",
-            else => "musl",
+            else => if (target.cpu.arch.isArm())
+                "musleabihf"
+            else
+                "musl",
         },
-        .muslabin32 => "muslabin32",
-        .muslabi64 => "muslabi64",
-        .musleabi => "musleabi",
-        .musleabihf => "musleabihf",
         .muslf32 => "muslf32",
-        .muslsf => "muslsf",
+        .musln32, .musln32sf => "muslabin32",
+        .muslsf => if (target.cpu.arch.isArm())
+            "musleabi"
+        else
+            "muslsf",
         .muslx32 => "muslx32",
-        .msvc => "msvc",
-        .itanium => "itanium",
+        .n32, .n32f32, .n32sf => "muslabin32", // https://github.com/ziglang/zig/issues/25649
+        .ohos, .ohossf => "ohos",
+        .sf => if (target.cpu.arch.isArm())
+            "eabi"
+        else
+            "unknown",
         .simulator => "simulator",
-        .ohos, .ohoseabi => "ohos",
-        .call0 => "unknown",
+        .x32, .x32sf => "muslx32", // https://github.com/ziglang/zig/issues/25649
+
+        .call0,
+        .f32,
+        .ilp32,
+        => "unknown",
     };
-    try llvm_triple.appendSlice(llvm_abi);
+    try llvm_triple.appendSlice(allocator, llvm_abi);
 
     switch (target.os.versionRange()) {
         .none,
@@ -365,17 +408,17 @@ pub fn tripleForTarget(allocator: Allocator, target: *const std.Target) ![]const
         .windows,
         => {},
         inline .hurd, .linux => |ver| if (target.abi.isGnu()) {
-            try llvm_triple.print("{d}.{d}.{d}", .{
+            try llvm_triple.print(allocator, "{d}.{d}.{d}", .{
                 ver.glibc.major,
                 ver.glibc.minor,
                 ver.glibc.patch,
             });
         } else if (@TypeOf(ver) == std.Target.Os.LinuxVersionRange and target.abi.isAndroid()) {
-            try llvm_triple.print("{d}", .{ver.android});
+            try llvm_triple.print(allocator, "{d}", .{ver.android});
         },
     }
 
-    return llvm_triple.toOwnedSlice();
+    return llvm_triple.toOwnedSlice(allocator);
 }
 
 pub const DataLayout = struct {
@@ -384,9 +427,11 @@ pub const DataLayout = struct {
     float_specs: PrimitiveSpec.Map,
     vector_specs: PrimitiveSpec.Map,
     pointer_specs: PointerSpec.Map,
+    struct_abi_align: Alignment,
+    struct_pref_align: Alignment,
     string_repr: String,
 
-    const PrimitiveSpec = packed struct(u32) {
+    const PrimitiveSpec = bitpack struct(u32) {
         bit_width: BitWidth,
         abi_align: Alignment,
         pref_align: Alignment,
@@ -409,7 +454,7 @@ pub const DataLayout = struct {
     const PointerSpec = struct {
         bit_width: BitWidth,
         index_bit_width: BitWidth,
-        flags: packed struct(u32) {
+        flags: bitpack struct(u32) {
             abi_align: Alignment,
             pref_align: Alignment,
             has_unstable_repr: bool,
@@ -429,51 +474,61 @@ pub const DataLayout = struct {
     pub fn stringForTarget(target: *const std.Target) []const u8 {
         // These data layouts should match Clang.
         return switch (target.cpu.arch) {
-            .arc => "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32",
-            .xcore => "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32",
-            .hexagon => "e-m:e-p:32:32:32-a:0-n16:32-i64:64:64-i32:32:32-i16:16:16-i1:8:8-f32:32:32-f64:64:64-v32:32:32-v64:64:64-v512:512:512-v1024:1024:1024-v2048:2048:2048",
-            .lanai => "E-m:e-p:32:32-i64:64-a:0:32-n32-S64",
-            .aarch64 => if (target.ofmt == .macho)
-                if (target.os.tag == .windows or target.os.tag == .uefi)
-                    "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
-                else if (target.abi == .ilp32)
-                    "e-m:o-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
-                else
-                    "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
+            .aarch64 => if (target.os.tag.isDarwin())
+                "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
             else if (target.os.tag == .windows or target.os.tag == .uefi)
                 "e-m:w-p270:32:32-p271:32:32-p272:64:64-p:64:64-i32:32-i64:64-i128:128-n32:64-S128-Fn32"
             else
                 "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32",
             .aarch64_be => "E-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32",
-            .arm => if (target.ofmt == .macho)
-                "e-m:o-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64"
-            else
-                "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
-            .armeb, .thumbeb => if (target.ofmt == .macho)
-                "E-m:o-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64"
-            else
-                "E-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
-            .thumb => if (target.ofmt == .macho)
-                "e-m:o-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64"
-            else if (target.os.tag == .windows or target.os.tag == .uefi)
+            .amdgcn => "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9",
+            .arc => "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32",
+            .arm => "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
+            .armeb, .thumbeb => "E-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
+            .thumb => if (target.os.tag == .windows or target.os.tag == .uefi)
                 "e-m:w-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64"
             else
                 "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
             .avr => "e-P1-p:16:8-i8:8-i16:8-i32:8-i64:8-f32:8-f64:8-n8:16-a:8",
             .bpfeb => "E-m:e-p:64:64-i64:64-i128:128-n32:64-S128",
             .bpfel => "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128",
-            .msp430 => "e-m:e-p:16:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16",
-            .mips => "E-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64",
-            .mipsel => "e-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64",
-            .mips64 => switch (target.abi) {
-                .gnuabin32, .muslabin32, .abin32 => "E-m:e-p:32:32-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
-                else => "E-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
-            },
-            .mips64el => switch (target.abi) {
-                .gnuabin32, .muslabin32, .abin32 => "e-m:e-p:32:32-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
-                else => "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
-            },
+            .csky => "e-m:e-S32-p:32:32-i32:32:32-i64:32:32-f32:32:32-f64:32:32-v64:32:32-v128:32:32-a:0:32-Fi32-n32",
+            .hexagon => "e-m:e-p:32:32:32-a:0-n16:32-i64:64:64-i32:32:32-i16:16:16-i1:8:8-f32:32:32-f64:64:64-v32:32:32-v64:64:64-v512:512:512-v1024:1024:1024-v2048:2048:2048",
+            .lanai => "E-m:e-p:32:32-i64:64-a:0:32-n32-S64",
+            .loongarch32 => "e-m:e-p:32:32-i64:64-n32-S128",
+            .loongarch64 => "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128",
             .m68k => "E-m:e-p:32:16:32-i8:8:8-i16:16:16-i32:16:32-n8:16:32-a:0:16-S16",
+            .mips,
+            .mipsf32,
+            .mipsf64,
+            .mipsf64n8,
+            .mipsn8,
+            .mipsr6,
+            => "E-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64",
+            .mipsel,
+            .mipsf32el,
+            .mipsf64el,
+            .mipsf64n8el,
+            .mipsn8el,
+            .mipsr6el,
+            => "e-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64",
+            .mips64,
+            .mips64n8,
+            .mips64r6,
+            => if (target.abi.isN32())
+                "E-m:e-p:32:32-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
+            else
+                "E-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
+            .mips64el,
+            .mips64n8el,
+            .mips64r6el,
+            => if (target.abi.isN32())
+                "e-m:e-p:32:32-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
+            else
+                "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
+            .msp430 => "e-m:e-p:16:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16",
+            .nvptx => "e-p:32:32-p6:32:32-p7:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64",
+            .nvptx64 => "e-p6:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64",
             .powerpc => "E-m:e-p:32:32-Fn32-i64:64-n32",
             .powerpcle => "e-m:e-p:32:32-Fn32-i64:64-n32",
             .powerpc64 => switch (target.os.tag) {
@@ -485,9 +540,6 @@ pub const DataLayout = struct {
                 "e-m:e-Fn32-i64:64-i128:128-n32:64-S128-v256:256:256-v512:512:512"
             else
                 "e-m:e-Fn32-i64:64-i128:128-n32:64",
-            .nvptx => "e-p:32:32-p6:32:32-p7:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64",
-            .nvptx64 => "e-p6:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64",
-            .amdgcn => "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9",
             .riscv32 => if (target.cpu.has(.riscv, .e))
                 "e-m:e-p:32:32-i64:64-n32-S32"
             else
@@ -504,10 +556,28 @@ pub const DataLayout = struct {
                 "E-m:e-p:64:64-i64:64-i128:128-n32:64-S64"
             else
                 "E-m:e-p:64:64-i64:64-i128:128-n32:64-S128",
+            .s390x => "E-S64-m:e-i1:8:16-i8:8:16-i64:64-f128:64-v128:64-a:8:16-n32:64",
             .sparc => "E-m:e-p:32:32-i64:64-i128:128-f128:64-n32-S64",
             .sparc64 => "E-m:e-i64:64-i128:128-n32:64-S128",
-            .s390x => "E-S64-m:e-i1:8:16-i8:8:16-i64:64-f128:64-v128:64-a:8:16-n32:64",
-            .x86 => if (target.os.tag == .windows or target.os.tag == .uefi) switch (target.abi) {
+            .spirv32 => switch (target.os.tag) {
+                .vulkan, .opengl => "e-ve-i64:64-n8:16:32:64-G10",
+                else => "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64-G1",
+            },
+            .spirv64 => if (target.os.tag == .amdhsa)
+                "e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-n32:64-S32-G1-P4-A0"
+            else
+                "e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64-G1",
+            .ve => "e-m:e-i64:64-n32:64-S128-v64:64:64-v128:64:64-v256:64:64-v512:64:64-v1024:64:64-v2048:64:64-v4096:64:64-v8192:64:64-v16384:64:64",
+            .wasm32 => if (target.os.tag == .emscripten)
+                "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-f128:64-n32:64-S128-ni:1:10:20"
+            else
+                "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20",
+            .wasm64 => if (target.os.tag == .emscripten)
+                "e-m:e-p:64:64-p10:8:8-p20:8:8-i64:64-i128:128-f128:64-n32:64-S128-ni:1:10:20"
+            else
+                "e-m:e-p:64:64-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20",
+            // TODO: clean this up; what is even going on in this prong?
+            .x86, .x86c16 => if (target.os.tag == .windows or target.os.tag == .uefi) switch (target.abi) {
                 .gnu => if (target.ofmt == .coff)
                     "e-m:x-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:32-n8:16:32-a:0:32-S32"
                 else
@@ -528,39 +598,16 @@ pub const DataLayout = struct {
                     else
                         "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:32-n8:16:32-a:0:32-S32";
                 },
-            } else if (target.ofmt == .macho)
-                "e-m:o-p:32:32-p270:32:32-p271:32:32-p272:64:64-i128:128-f64:32:64-f80:32-n8:16:32-S128"
-            else
-                "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i128:128-f64:32:64-f80:32-n8:16:32-S128",
-            .x86_64 => if (target.os.tag.isDarwin() or target.ofmt == .macho)
+            } else "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i128:128-f64:32:64-f80:32-n8:16:32-S128",
+            .x86_64 => if (target.os.tag.isDarwin())
                 "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
-            else switch (target.abi) {
-                .gnux32, .muslx32, .x32 => "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
-                else => if ((target.os.tag == .windows or target.os.tag == .uefi) and target.ofmt == .coff)
-                    "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
-                else
-                    "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
-            },
-            .spirv32 => switch (target.os.tag) {
-                .vulkan, .opengl => "e-ve-i64:64-n8:16:32:64-G10",
-                else => "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64-G1",
-            },
-            .spirv64 => if (target.os.tag == .amdhsa)
-                "e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-n32:64-S32-G1-P4-A0"
+            else if (target.os.tag == .windows or target.os.tag == .uefi)
+                "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
+            else if (target.abi.isX32())
+                "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
             else
-                "e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64-G1",
-            .wasm32 => if (target.os.tag == .emscripten)
-                "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-f128:64-n32:64-S128-ni:1:10:20"
-            else
-                "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20",
-            .wasm64 => if (target.os.tag == .emscripten)
-                "e-m:e-p:64:64-p10:8:8-p20:8:8-i64:64-i128:128-f128:64-n32:64-S128-ni:1:10:20"
-            else
-                "e-m:e-p:64:64-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20",
-            .ve => "e-m:e-i64:64-n32:64-S128-v64:64:64-v128:64:64-v256:64:64-v512:64:64-v1024:64:64-v2048:64:64-v4096:64:64-v8192:64:64-v16384:64:64",
-            .csky => "e-m:e-S32-p:32:32-i32:32:32-i64:32:32-f32:32:32-f64:32:32-v64:32:32-v128:32:32-a:0:32-Fi32-n32",
-            .loongarch32 => "e-m:e-p:32:32-i64:64-n32-S128",
-            .loongarch64 => "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128",
+                "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+            .xcore => "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32",
             .xtensa => "e-m:e-p:32:32-i8:8:32-i16:16:32-i64:64-n32",
 
             .alpha,
@@ -568,7 +615,6 @@ pub const DataLayout = struct {
             .ez80,
             .hppa,
             .hppa64,
-            .kalimba,
             .kvx,
             .m88k,
             .microblaze,
@@ -577,9 +623,10 @@ pub const DataLayout = struct {
             .propeller,
             .sh,
             .sheb,
+            .spork8,
             .x86_16,
             .xtensaeb,
-            .spork8,
+            .z80,
             => unreachable,
         };
     }
@@ -635,6 +682,8 @@ pub const DataLayout = struct {
         });
 
         var endian: ?std.lang.Endian = null;
+        var struct_abi_align: Alignment = .fromByteUnits(1);
+        var struct_pref_align: Alignment = .fromByteUnits(8);
         var spec_it = std.mem.splitScalar(u8, string_repr.slice(builder).?, '-');
         while (spec_it.next()) |spec| switch (spec[0]) {
             else => {},
@@ -728,6 +777,18 @@ pub const DataLayout = struct {
                 const gop = try specs.getOrPut(gpa, primitive_spec);
                 gop.key_ptr.* = primitive_spec;
             },
+            'a' => {
+                var field_it = std.mem.splitScalar(u8, spec[1..], ':');
+                assert(field_it.first().len == 0);
+                struct_abi_align = .fromByteUnits(@max(
+                    @divExact(std.fmt.parseInt(u64, field_it.next().?, 10) catch unreachable, 8),
+                    1,
+                ));
+                struct_pref_align = if (field_it.next()) |pref_align| .fromByteUnits(
+                    @divExact(std.fmt.parseInt(u64, pref_align, 10) catch unreachable, 8),
+                ) else struct_abi_align;
+                assert(field_it.peek() == null);
+            },
             'n' => {
                 var field_it = std.mem.splitScalar(u8, spec[1..], ':');
                 if (std.mem.eql(u8, field_it.first(), "i")) {
@@ -779,6 +840,8 @@ pub const DataLayout = struct {
             .float_specs = float_specs.move(),
             .vector_specs = vector_specs.move(),
             .pointer_specs = pointer_specs.move(),
+            .struct_abi_align = struct_abi_align,
+            .struct_pref_align = struct_pref_align,
             .string_repr = string_repr,
         };
     }
@@ -829,7 +892,7 @@ pub const DataLayout = struct {
         })) |entry| return entry.key_ptr.*;
         const default_align: Alignment = .fromByteUnits(std.math.ceilPowerOfTwoAssert(
             PrimitiveSpec.BitWidth,
-            std.mem.alignForward(PrimitiveSpec.BitWidth, known_min_bit_width, 8),
+            @divCeil(known_min_bit_width, 8),
         ));
         return .{
             .bit_width = known_min_bit_width,
@@ -1076,7 +1139,7 @@ pub const Type = enum(u32) {
         child: Type,
 
         fn length(self: Array) u64 {
-            return @as(u64, self.len_hi) << 32 | self.len_lo;
+            return (@as(u64, self.len_hi) << 32) | self.len_lo;
         }
     };
 
@@ -1084,7 +1147,7 @@ pub const Type = enum(u32) {
         fields_len: u32,
         //fields: [fields_len]Type,
 
-        pub const Kind = enum { normal, @"packed" };
+        pub const Kind = enum { normal, @"bitpack" };
     };
 
     pub const NamedStructure = struct {
@@ -1092,7 +1155,7 @@ pub const Type = enum(u32) {
         body: Type,
     };
 
-    pub const Item = packed struct(u32) {
+    pub const Item = bitpack struct(u32) {
         tag: Tag,
         data: ExtraIndex,
 
@@ -1222,7 +1285,7 @@ pub const Type = enum(u32) {
     pub fn structKind(self: Type, builder: *const Builder) Type.Structure.Kind {
         return switch (self.unnamedTag(builder)) {
             .structure => .normal,
-            .packed_structure => .@"packed",
+            .packed_structure => .@"bitpack",
             else => unreachable,
         };
     }
@@ -1721,6 +1784,26 @@ pub const Type = enum(u32) {
                     .scalable_vector => .{ .scalable = min_bits },
                 };
             },
+            .small_array, .array => .{
+                .fixed = ty.aggregateLen(builder) * ty.childType(builder).allocSize(builder).fixed * 8,
+            },
+            .structure, .packed_structure => {
+                var extra = builder.typeExtraDataTrail(Type.Structure, item.data);
+                const fields = extra.trail.next(extra.data.fields_len, Type, builder);
+                var size: u64 = 0;
+                var struct_align: Alignment = .fromByteUnits(1);
+                for (fields) |field| {
+                    const field_align: Alignment = switch (item.tag) {
+                        else => unreachable,
+                        .structure => field.alignment(.abi, builder),
+                        .packed_structure => .fromByteUnits(1),
+                    };
+                    size = field_align.forward(size) + field.allocSize(builder).fixed;
+                    struct_align = struct_align.max(field_align);
+                }
+                return .{ .fixed = struct_align.forward(size) * 8 };
+            },
+            .named_structure => builder.typeExtraData(Type.NamedStructure, item.data).body.bits(builder),
         };
     }
 
@@ -1728,6 +1811,14 @@ pub const Type = enum(u32) {
         return switch (ty.bits(builder)) {
             .fixed => |fixed| .{ .fixed = @divCeil(fixed, 8) },
             .scalable => |known_min| .{ .scalable = @divCeil(known_min, 8) },
+        };
+    }
+
+    pub fn allocSize(ty: Type, builder: *const Builder) Size {
+        const abi_align = ty.alignment(.abi, builder);
+        return switch (ty.storeSize(builder)) {
+            .fixed => |fixed| .{ .fixed = abi_align.forward(fixed) },
+            .scalable => |known_min| .{ .scalable = abi_align.forward(known_min) },
         };
     }
 
@@ -1774,6 +1865,23 @@ pub const Type = enum(u32) {
                     .pref => spec.pref_align,
                 };
             },
+            .small_array, .array => return ty.childType(builder).alignment(kind, builder),
+            .structure => {
+                var extra = builder.typeExtraDataTrail(Type.Structure, item.data);
+                const fields = extra.trail.next(extra.data.fields_len, Type, builder);
+                var struct_align = switch (kind) {
+                    .abi => builder.data_layout.struct_abi_align,
+                    .pref => builder.data_layout.struct_pref_align,
+                };
+                for (fields) |field| struct_align = struct_align.max(field.alignment(.abi, builder));
+                return struct_align;
+            },
+            .packed_structure => return switch (kind) {
+                .abi => .fromByteUnits(1),
+                .pref => builder.data_layout.struct_pref_align,
+            },
+            .named_structure => return builder.typeExtraData(Type.NamedStructure, item.data).body
+                .alignment(kind, builder),
         }
     }
 };
@@ -2398,7 +2506,7 @@ pub const Attribute = union(Kind) {
         };
     };
 
-    pub const FpClass = packed struct(u32) {
+    pub const FpClass = bitpack struct(u32) {
         signaling_nan: bool = false,
         quiet_nan: bool = false,
         negative_infinity: bool = false,
@@ -2445,14 +2553,14 @@ pub const Attribute = union(Kind) {
         pub const pnorm = FpClass{ .positive_normal = true };
     };
 
-    pub const Captures = packed struct(u32) {
+    pub const Captures = bitpack struct(u32) {
         other: Components = .none,
         ret: Components = .none,
         _: u24 = 0,
 
         pub const none: Captures = .{};
 
-        pub const Components = packed struct(u4) {
+        pub const Components = bitpack struct(u4) {
             address_is_null: bool = false,
             address: bool = false,
             read_provenance: bool = false,
@@ -2468,7 +2576,7 @@ pub const Attribute = union(Kind) {
         };
     };
 
-    pub const AllocKind = packed struct(u32) {
+    pub const AllocKind = bitpack struct(u32) {
         alloc: bool,
         realloc: bool,
         free: bool,
@@ -2478,13 +2586,13 @@ pub const Attribute = union(Kind) {
         _: u26 = 0,
     };
 
-    pub const AllocSize = packed struct(u32) {
+    pub const AllocSize = bitpack struct(u32) {
         elem_size: u16,
         num_elems: u16,
 
         pub const none = maxInt(u16);
 
-        fn toLlvm(self: AllocSize) packed struct(u64) { num_elems: u32, elem_size: u32 } {
+        fn toLlvm(self: AllocSize) bitpack struct(u64) { num_elems: u32, elem_size: u32 } {
             return .{ .num_elems = switch (self.num_elems) {
                 else => self.num_elems,
                 none => maxInt(u32),
@@ -2492,7 +2600,7 @@ pub const Attribute = union(Kind) {
         }
     };
 
-    pub const Memory = packed struct(u32) {
+    pub const Memory = bitpack struct(u32) {
         argmem: Effect = .none,
         inaccessiblemem: Effect = .none,
         other: Effect = .none,
@@ -2513,12 +2621,12 @@ pub const Attribute = union(Kind) {
         pub const default = UwTable.async;
     };
 
-    pub const VScaleRange = packed struct(u32) {
+    pub const VScaleRange = bitpack struct(u32) {
         min: Alignment,
         max: Alignment,
         _: u20 = 0,
 
-        fn toLlvm(self: VScaleRange) packed struct(u64) { max: u32, min: u32 } {
+        fn toLlvm(self: VScaleRange) bitpack struct(u64) { max: u32, min: u32 } {
             return .{
                 .max = @intCast(self.max.toByteUnits() orelse 0),
                 .min = @intCast(self.min.toByteUnits().?),
@@ -3043,6 +3151,19 @@ pub const Alignment = enum(u6) {
             .default => null,
             else => @as(u64, 1) << @backingInt(self),
         };
+    }
+
+    /// Align an address forward to this alignment. Asserts that `a` is not `.default`.
+    pub fn forward(a: Alignment, addr: u64) u64 {
+        assert(a != .default);
+        const x = (@as(u64, 1) << @backingInt(a)) - 1;
+        return (addr + x) & ~x;
+    }
+
+    /// Check if an address is aligned to this amount. Asserts that `a` is not `.default`.
+    pub fn check(a: Alignment, addr: u64) bool {
+        assert(a != .default);
+        return @ctz(addr) >= @backingInt(a);
     }
 
     /// Asserts that neither `lhs` nor `rhs` is `.default`.
@@ -6176,7 +6297,7 @@ pub const Function = struct {
             info: Info,
 
             pub const Kind = enum { normal, inalloca };
-            pub const Info = packed struct(u32) {
+            pub const Info = bitpack struct(u32) {
                 alignment: Alignment,
                 addr_space: AddrSpace,
                 _: u2 = undefined,
@@ -6275,7 +6396,7 @@ pub const Function = struct {
                 tail,
                 tail_fast,
             };
-            pub const Info = packed struct(u32) {
+            pub const Info = bitpack struct(u32) {
                 call_conv: CallConv,
                 has_op_bundle_cold: bool,
                 _: u21 = undefined,
@@ -7113,14 +7234,15 @@ pub const WipFunction = struct {
 
     pub fn conv(
         self: *WipFunction,
-        signedness: Instruction.Cast.Signedness,
+        val_signedness: Instruction.Cast.Signedness,
         val: Value,
+        ty_signedness: Instruction.Cast.Signedness,
         ty: Type,
         name: []const u8,
     ) Allocator.Error!Value {
         const val_ty = val.typeOfWip(self);
         if (val_ty == ty) return val;
-        return self.cast(self.builder.convTag(signedness, val_ty, ty), val, ty, name);
+        return self.cast(self.builder.convTag(val_signedness, val_ty, ty_signedness, ty), val, ty, name);
     }
 
     pub fn cast(
@@ -8364,7 +8486,7 @@ pub const AtomicOrdering = enum(u3) {
     }
 };
 
-const MemoryAccessInfo = packed struct(u32) {
+const MemoryAccessInfo = bitpack struct(u32) {
     access_kind: MemoryAccessKind = .normal,
     atomic_rmw_operation: Function.Instruction.AtomicRmw.Operation = .none,
     sync_scope: SyncScope,
@@ -8374,7 +8496,7 @@ const MemoryAccessInfo = packed struct(u32) {
     _: u13 = undefined,
 };
 
-pub const FastMath = packed struct(u8) {
+pub const FastMath = bitpack struct(u8) {
     unsafe_algebra: bool = false, // Legacy
     nnan: bool = false,
     ninf: bool = false,
@@ -8509,7 +8631,7 @@ pub const Constant = enum(u32) {
         const ExtraIndex = u32;
     };
 
-    pub const Integer = packed struct(u64) {
+    pub const Integer = bitpack struct(u64) {
         type: Type,
         limbs_len: u32,
 
@@ -8575,7 +8697,7 @@ pub const Constant = enum(u32) {
 
         pub const Kind = enum { normal, inbounds };
         pub const InRangeIndex = enum(u16) { none = maxInt(u16), _ };
-        pub const Info = packed struct(u32) { indices_len: u16, inrange: InRangeIndex };
+        pub const Info = bitpack struct(u32) { indices_len: u16, inrange: InRangeIndex };
     };
 
     pub const Binary = extern struct {
@@ -8588,7 +8710,7 @@ pub const Constant = enum(u32) {
         assembly: String,
         constraints: String,
 
-        pub const Info = packed struct {
+        pub const Info = bitpack struct {
             sideeffect: bool = false,
             alignstack: bool = false,
             inteldialect: bool = false,
@@ -8852,7 +8974,7 @@ pub const Constant = enum(u32) {
                     .float => {
                         const Float = struct {
                             fn Repr(comptime T: type) type {
-                                return packed struct(@Int(.unsigned, @bitSizeOf(T))) {
+                                return bitpack struct(@Int(.unsigned, @bitSizeOf(T))) {
                                     mantissa: @Int(.unsigned, std.math.floatMantissaBits(T)),
                                     exponent: @Int(.unsigned, std.math.floatExponentBits(T)),
                                     sign: u1,
@@ -9136,7 +9258,7 @@ pub const Value = enum(u32) {
     }
 };
 
-pub const Metadata = packed struct(u32) {
+pub const Metadata = bitpack struct(u32) {
     index: u29,
     kind: Kind,
     unused: enum(u1) { unused = 0 } = .unused,
@@ -9150,7 +9272,7 @@ pub const Metadata = packed struct(u32) {
 
     pub const empty_tuple: Metadata = .{ .kind = .node, .index = 0 };
 
-    pub const Optional = packed struct(u32) {
+    pub const Optional = bitpack struct(u32) {
         index: u29,
         kind: Metadata.Kind,
         is_none: bool,
@@ -9359,7 +9481,7 @@ pub const Metadata = packed struct(u32) {
         const ExtraIndex = u32;
     };
 
-    pub const DIFlags = packed struct(u32) {
+    pub const DIFlags = bitpack struct(u32) {
         Visibility: enum(u2) { Zero, Private, Protected, Public } = .Zero,
         FwdDecl: bool = false,
         AppleBlock: bool = false,
@@ -9439,7 +9561,7 @@ pub const Metadata = packed struct(u32) {
             sp_flags: DISPFlags,
         };
 
-        pub const DISPFlags = packed struct(u32) {
+        pub const DISPFlags = bitpack struct(u32) {
             Virtuality: enum(u2) { Zero, Virtual, PureVirtual } = .Zero,
             LocalToUnit: bool = false,
             Definition: bool = false,
@@ -9520,7 +9642,7 @@ pub const Metadata = packed struct(u32) {
         size_in_bits_hi: u32,
 
         pub fn bitSize(self: BasicType) u64 {
-            return @as(u64, self.size_in_bits_hi) << 32 | self.size_in_bits_lo;
+            return (@as(u64, self.size_in_bits_hi) << 32) | self.size_in_bits_lo;
         }
     };
 
@@ -9537,10 +9659,10 @@ pub const Metadata = packed struct(u32) {
         fields_tuple: Metadata.Optional,
 
         pub fn bitSize(self: CompositeType) u64 {
-            return @as(u64, self.size_in_bits_hi) << 32 | self.size_in_bits_lo;
+            return (@as(u64, self.size_in_bits_hi) << 32) | self.size_in_bits_lo;
         }
         pub fn bitAlign(self: CompositeType) u64 {
-            return @as(u64, self.align_in_bits_hi) << 32 | self.align_in_bits_lo;
+            return (@as(u64, self.align_in_bits_hi) << 32) | self.align_in_bits_lo;
         }
     };
 
@@ -9558,13 +9680,13 @@ pub const Metadata = packed struct(u32) {
         offset_in_bits_hi: u32,
 
         pub fn bitSize(self: DerivedType) u64 {
-            return @as(u64, self.size_in_bits_hi) << 32 | self.size_in_bits_lo;
+            return (@as(u64, self.size_in_bits_hi) << 32) | self.size_in_bits_lo;
         }
         pub fn bitAlign(self: DerivedType) u64 {
-            return @as(u64, self.align_in_bits_hi) << 32 | self.align_in_bits_lo;
+            return (@as(u64, self.align_in_bits_hi) << 32) | self.align_in_bits_lo;
         }
         pub fn bitOffset(self: DerivedType) u64 {
-            return @as(u64, self.offset_in_bits_hi) << 32 | self.offset_in_bits_lo;
+            return (@as(u64, self.offset_in_bits_hi) << 32) | self.offset_in_bits_lo;
         }
     };
 
@@ -9900,6 +10022,8 @@ pub fn init(options: Options) Allocator.Error!Builder {
             .float_specs = .empty,
             .vector_specs = .empty,
             .pointer_specs = .empty,
+            .struct_abi_align = .fromByteUnits(1),
+            .struct_pref_align = .fromByteUnits(8),
             .string_repr = .none,
         },
         .target_triple = .none,
@@ -10234,6 +10358,55 @@ pub fn opaqueType(self: *Builder, name: String) Allocator.Error!Type {
     return self.opaqueTypeAssumeCapacity(name);
 }
 
+pub fn targetType(
+    self: *Builder,
+    name: String,
+    types: []const Type,
+    ints: []const u32,
+) Allocator.Error!Type {
+    try self.ensureUnusedTypeCapacity(1, Type.Target, types.len + ints.len);
+    const Key = struct { name: String, types: []const Type, ints: []const u32 };
+    const Adapter = struct {
+        builder: *const Builder,
+        pub fn hash(_: @This(), key: Key) u32 {
+            var hasher: std.hash.Wyhash = .init(comptime std.hash.int(@backingInt(Type.Tag.target)));
+            hasher.update(std.mem.asBytes(&key.name));
+            hasher.update(std.mem.sliceAsBytes(key.types));
+            hasher.update(std.mem.sliceAsBytes(key.ints));
+            return @truncate(hasher.final());
+        }
+        pub fn eql(ctx: @This(), lhs_key: Key, _: void, rhs_index: usize) bool {
+            const rhs_data = ctx.builder.type_items.items[rhs_index];
+            if (rhs_data.tag != .target) return false;
+            var extra = ctx.builder.typeExtraDataTrail(Type.Target, rhs_data.data);
+            if (lhs_key.name != extra.data.name) return false;
+            const rhs_types = extra.trail.next(extra.data.types_len, Type, ctx.builder);
+            const rhs_ints = extra.trail.next(extra.data.ints_len, u32, ctx.builder);
+            return std.mem.eql(Type, lhs_key.types, rhs_types) and
+                std.mem.eql(u32, lhs_key.ints, rhs_ints);
+        }
+    };
+    const gop = self.type_map.getOrPutAssumeCapacityAdapted(
+        Key{ .name = name, .types = types, .ints = ints },
+        Adapter{ .builder = self },
+    );
+    if (!gop.found_existing) {
+        gop.key_ptr.* = {};
+        gop.value_ptr.* = {};
+        self.type_items.appendAssumeCapacity(.{
+            .tag = .target,
+            .data = self.addTypeExtraAssumeCapacity(Type.Target{
+                .name = name,
+                .types_len = @intCast(types.len),
+                .ints_len = @intCast(ints.len),
+            }),
+        });
+        self.type_extra.appendSliceAssumeCapacity(@ptrCast(types));
+        self.type_extra.appendSliceAssumeCapacity(ints);
+    }
+    return @fromBackingInt(@intCast(gop.index));
+}
+
 pub fn namedTypeSetBody(
     self: *Builder,
     named_type: Type,
@@ -10442,24 +10615,24 @@ pub fn getIntrinsic(
 
     var attributes: struct {
         builder: *Builder,
-        list: std.array_list.Managed(Attribute.Index),
+        list: std.ArrayList(Attribute.Index),
 
-        fn deinit(state: *@This()) void {
-            state.list.deinit();
+        fn deinit(state: *@This(), gpa: Allocator) void {
+            state.list.deinit(gpa);
             state.* = undefined;
         }
 
-        fn get(state: *@This(), attributes: []const Attribute) Allocator.Error!Attributes {
-            try state.list.resize(attributes.len);
+        fn get(state: *@This(), gpa: Allocator, attributes: []const Attribute) Allocator.Error!Attributes {
+            try state.list.resize(gpa, attributes.len);
             for (state.list.items, attributes) |*item, attribute|
                 item.* = try state.builder.attr(attribute);
             return state.builder.attrs(state.list.items);
         }
-    } = .{ .builder = self, .list = std.array_list.Managed(Attribute.Index).init(allocator) };
-    defer attributes.deinit();
+    } = .{ .builder = self, .list = .empty };
+    defer attributes.deinit(allocator);
 
     var overload_index: usize = 0;
-    function_attributes[FunctionAttributes.function_index] = try attributes.get(signature.attrs);
+    function_attributes[FunctionAttributes.function_index] = try attributes.get(allocator, signature.attrs);
     function_attributes[FunctionAttributes.return_index] = .none; // needed for void return
     for (0.., param_types, signature.params) |param_index, *param_type, signature_param| {
         switch (signature_param.kind) {
@@ -10475,7 +10648,7 @@ pub fn getIntrinsic(
                 FunctionAttributes.return_index
             else
                 FunctionAttributes.params_index + (param_index - signature.ret_len)
-        ] = try attributes.get(signature_param.attrs);
+        ] = try attributes.get(allocator, signature_param.attrs);
     }
     assert(overload_index == overload.len);
     for (param_types, signature.params) |*param_type, signature_param| {
@@ -10855,11 +11028,22 @@ pub fn resolveAlignmentForwardReference(b: *Builder, fwd_ref: Alignment.Lazy, va
     b.alignment_forward_references.items[index] = value;
 }
 
-pub fn dump(b: *Builder, io: Io) void {
-    var buffer: [4000]u8 = undefined;
-    const stderr: Io.File = .stderr();
-    b.printToFile(io, stderr, &buffer) catch {};
-}
+pub const Print = struct {
+    name: []const u8,
+    builder: *Builder,
+    err: ?Allocator.Error,
+
+    pub fn format(p: *Print, w: *Writer) Writer.Error!void {
+        try w.print("{q}", .{p.name});
+        p.builder.print(w) catch |err| switch (err) {
+            error.WriteFailed => |e| return e,
+            error.OutOfMemory => |e| {
+                p.err = e;
+                return error.WriteFailed;
+            },
+        };
+    }
+};
 
 pub fn printToFilePath(b: *Builder, io: Io, dir: Io.Dir, path: []const u8) !void {
     var buffer: [4000]u8 = undefined;
@@ -12137,7 +12321,7 @@ fn structTypeAssumeCapacity(
 ) Type {
     const tag: Type.Tag = switch (kind) {
         .normal => .structure,
-        .@"packed" => .packed_structure,
+        .@"bitpack" => .packed_structure,
     };
     const Adapter = struct {
         builder: *const Builder,
@@ -12446,7 +12630,7 @@ fn doubleConstAssumeCapacity(self: *Builder, val: f64) Constant {
             if (ctx.builder.constant_items.items(.tag)[rhs_index] != .double) return false;
             const rhs_data = ctx.builder.constant_items.items(.data)[rhs_index];
             const rhs_extra = ctx.builder.constantExtraData(Constant.Double, rhs_data);
-            return @as(u64, @bitCast(lhs_key)) == @as(u64, rhs_extra.hi) << 32 | rhs_extra.lo;
+            return @as(u64, @bitCast(lhs_key)) == (@as(u64, rhs_extra.hi) << 32) | rhs_extra.lo;
         }
     };
     const gop = self.constant_map.getOrPutAssumeCapacityAdapted(val, Adapter{ .builder = self });
@@ -12477,8 +12661,8 @@ fn fp128ConstAssumeCapacity(self: *Builder, val: f128) Constant {
             if (ctx.builder.constant_items.items(.tag)[rhs_index] != .fp128) return false;
             const rhs_data = ctx.builder.constant_items.items(.data)[rhs_index];
             const rhs_extra = ctx.builder.constantExtraData(Constant.Fp128, rhs_data);
-            return @as(u128, @bitCast(lhs_key)) == @as(u128, rhs_extra.hi_hi) << 96 |
-                @as(u128, rhs_extra.hi_lo) << 64 | @as(u128, rhs_extra.lo_hi) << 32 | rhs_extra.lo_lo;
+            return @as(u128, @bitCast(lhs_key)) == (@as(u128, rhs_extra.hi_hi) << 96) |
+                (@as(u128, rhs_extra.hi_lo) << 64) | (@as(u128, rhs_extra.lo_hi) << 32) | rhs_extra.lo_lo;
         }
     };
     const gop = self.constant_map.getOrPutAssumeCapacityAdapted(val, Adapter{ .builder = self });
@@ -12511,8 +12695,8 @@ fn x86_fp80ConstAssumeCapacity(self: *Builder, val: f80) Constant {
             if (ctx.builder.constant_items.items(.tag)[rhs_index] != .x86_fp80) return false;
             const rhs_data = ctx.builder.constant_items.items(.data)[rhs_index];
             const rhs_extra = ctx.builder.constantExtraData(Constant.Fp80, rhs_data);
-            return @as(u80, @bitCast(lhs_key)) == @as(u80, rhs_extra.hi) << 64 |
-                @as(u80, rhs_extra.lo_hi) << 32 | rhs_extra.lo_lo;
+            return @as(u80, @bitCast(lhs_key)) == (@as(u80, rhs_extra.hi) << 64) |
+                (@as(u80, rhs_extra.lo_hi) << 32) | rhs_extra.lo_lo;
         }
     };
     const gop = self.constant_map.getOrPutAssumeCapacityAdapted(val, Adapter{ .builder = self });
@@ -12544,8 +12728,8 @@ fn ppc_fp128ConstAssumeCapacity(self: *Builder, val: [2]f64) Constant {
             if (ctx.builder.constant_items.items(.tag)[rhs_index] != .ppc_fp128) return false;
             const rhs_data = ctx.builder.constant_items.items(.data)[rhs_index];
             const rhs_extra = ctx.builder.constantExtraData(Constant.Fp128, rhs_data);
-            return @as(u64, @bitCast(lhs_key[0])) == @as(u64, rhs_extra.lo_hi) << 32 | rhs_extra.lo_lo and
-                @as(u64, @bitCast(lhs_key[1])) == @as(u64, rhs_extra.hi_hi) << 32 | rhs_extra.hi_lo;
+            return @as(u64, @bitCast(lhs_key[0])) == (@as(u64, rhs_extra.lo_hi) << 32) | rhs_extra.lo_lo and
+                @as(u64, @bitCast(lhs_key[1])) == (@as(u64, rhs_extra.hi_hi) << 32) | rhs_extra.hi_lo;
         }
     };
     const gop = self.constant_map.getOrPutAssumeCapacityAdapted(val, Adapter{ .builder = self });
@@ -12814,8 +12998,9 @@ fn noCfiConstAssumeCapacity(self: *Builder, function: Function.Index) Constant {
 
 fn convTag(
     self: *Builder,
-    signedness: Constant.Cast.Signedness,
+    val_signedness: Constant.Cast.Signedness,
     val_ty: Type,
+    ty_signedness: Constant.Cast.Signedness,
     ty: Type,
 ) Function.Instruction.Tag {
     assert(val_ty != ty);
@@ -12826,7 +13011,7 @@ fn convTag(
                 .eq => unreachable,
                 .gt => .fptrunc,
             },
-            .integer => switch (signedness) {
+            .integer => switch (ty_signedness) {
                 .unsigned => .fptoui,
                 .signed => .fptosi,
                 .unneeded => unreachable,
@@ -12834,21 +13019,24 @@ fn convTag(
             else => unreachable,
         },
         .integer => switch (ty.scalarTag(self)) {
-            .simple => switch (signedness) {
+            .simple => switch (val_signedness) {
                 .unsigned => .uitofp,
                 .signed => .sitofp,
                 .unneeded => unreachable,
             },
             .integer => switch (std.math.order(val_ty.scalarBits(self), ty.scalarBits(self))) {
-                .lt => switch (signedness) {
+                .lt => switch (val_signedness) {
                     .unsigned => .zext,
                     .signed => .sext,
                     .unneeded => unreachable,
                 },
                 .eq => unreachable,
-                .gt => switch (signedness) {
+                .gt => switch (ty_signedness) {
                     .unsigned => .@"trunc nuw",
-                    .signed => .@"trunc nsw",
+                    .signed => switch (val_signedness) {
+                        .unsigned => .@"trunc nuw nsw",
+                        .signed, .unneeded => .@"trunc nsw",
+                    },
                     .unneeded => .trunc,
                 },
             },
@@ -14559,7 +14747,7 @@ pub fn toBitcode(self: *Builder, allocator: Allocator, producer: Producer) bitco
         const IdentificationBlock = ir.IdentificationBlock;
         var identification_block = try bitcode.enterTopBlock(IdentificationBlock);
 
-        const producer_str = try std.fmt.allocPrint(self.gpa, "{s} {d}.{d}.{d}", .{
+        const producer_str = try self.gpa.print("{s} {d}.{d}.{d}", .{
             producer.name,
             producer.version.major,
             producer.version.minor,
@@ -15214,18 +15402,18 @@ pub fn toBitcode(self: *Builder, allocator: Allocator, producer: Producer) bitco
                             for (limbs) |*limb| {
                                 const val = std.mem.littleToNative(i64, @bitCast(limb.*));
                                 limb.* = @bitCast(if (val >= 0)
-                                    val << 1 | 0
+                                    (val << 1) | 0
                                 else
-                                    -%val << 1 | 1);
+                                    (-%val << 1) | 1);
                             }
                             try constants_block.writeUnabbrev(5, record.items);
                             continue;
                         };
                         try constants_block.writeAbbrev(ConstantsBlock.Integer{
                             .value = @bitCast(if (val >= 0)
-                                val << 1 | 0
+                                (val << 1) | 0
                             else
-                                -%val << 1 | 1),
+                                (-%val << 1) | 1),
                         });
                     },
                     .half,
@@ -15241,8 +15429,8 @@ pub fn toBitcode(self: *Builder, allocator: Allocator, producer: Producer) bitco
                     .x86_fp80 => {
                         const extra = self.constantExtraData(Constant.Fp80, data);
                         try constants_block.writeAbbrev(ConstantsBlock.Fp80{
-                            .hi = @as(u64, extra.hi) << 48 | @as(u64, extra.lo_hi) << 16 |
-                                extra.lo_lo >> 16,
+                            .hi = (@as(u64, extra.hi) << 48) | (@as(u64, extra.lo_hi) << 16) |
+                                (extra.lo_lo >> 16),
                             .lo = @truncate(extra.lo_lo),
                         });
                     },
@@ -15251,8 +15439,8 @@ pub fn toBitcode(self: *Builder, allocator: Allocator, producer: Producer) bitco
                     => {
                         const extra = self.constantExtraData(Constant.Fp128, data);
                         try constants_block.writeAbbrev(ConstantsBlock.Fp128{
-                            .lo = @as(u64, extra.lo_hi) << 32 | @as(u64, extra.lo_lo),
-                            .hi = @as(u64, extra.hi_hi) << 32 | @as(u64, extra.hi_lo),
+                            .lo = (@as(u64, extra.lo_hi) << 32) | @as(u64, extra.lo_lo),
+                            .hi = (@as(u64, extra.hi_hi) << 32) | @as(u64, extra.hi_lo),
                         });
                     },
                     .array,
@@ -15713,9 +15901,9 @@ pub fn toBitcode(self: *Builder, allocator: Allocator, producer: Producer) bitco
                             for (limbs) |*limb| {
                                 const val = std.mem.littleToNative(i64, @bitCast(limb.*));
                                 limb.* = @bitCast(if (val >= 0)
-                                    val << 1 | 0
+                                    (val << 1) | 0
                                 else
-                                    -%val << 1 | 1);
+                                    (-%val << 1) | 1);
                             }
                             try metadata_block.writeUnabbrev(@backingInt(MetadataBlock.Code.ENUMERATOR), record.items);
                             continue;
@@ -15725,9 +15913,9 @@ pub fn toBitcode(self: *Builder, allocator: Allocator, producer: Producer) bitco
                             .bit_width = extra.bit_width,
                             .name = extra.name,
                             .value = @bitCast(if (val >= 0)
-                                val << 1 | 0
+                                (val << 1) | 0
                             else
-                                -%val << 1 | 1),
+                                (-%val << 1) | 1),
                         }, metadata_adapter);
                     },
                     .subrange => {

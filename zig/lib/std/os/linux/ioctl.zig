@@ -3,8 +3,22 @@ const std = @import("../../std.zig");
 const bits = switch (@import("builtin").cpu.arch) {
     .mips,
     .mipsel,
+    .mipsf32,
+    .mipsf32el,
+    .mipsf64,
+    .mipsf64el,
+    .mipsf64n8,
+    .mipsf64n8el,
+    .mipsn8,
+    .mipsn8el,
+    .mipsr6,
+    .mipsr6el,
     .mips64,
     .mips64el,
+    .mips64n8,
+    .mips64n8el,
+    .mips64r6,
+    .mips64r6el,
     .powerpc,
     .powerpcle,
     .powerpc64,
@@ -18,7 +32,7 @@ const bits = switch (@import("builtin").cpu.arch) {
 
 const Direction = @Int(.unsigned, bits.dir);
 
-pub const Request = packed struct {
+pub const Request = bitpack struct {
     nr: u8,
     io_type: u8,
     size: @Int(.unsigned, bits.size),

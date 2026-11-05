@@ -1,0 +1,23 @@
+#zig build-obj {
+--name test -fno-emit-bin
+-Mroot=test.zig
+#}
+
+#write test.zig {
+const Struct = struct {
+    a: u32,
+};
+fn getIndex() usize {
+    return 2;
+}
+export fn entry() void {
+    const index = getIndex();
+    const field = @typeInfo(Struct).@"struct".field_types[index];
+    _ = field;
+}
+#}
+#update
+#check errors {
+test.zig:9:58: error: cannot load comptime-only type 'type'
+test.zig:9:59: note: pointer is runtime-known
+#}

@@ -16,12 +16,12 @@ pub fn classifyType(ty: Type, zcu: *Zcu) Class {
     const max_byval_size = target.ptrBitWidth() * 2;
     switch (ty.zigTypeTag(zcu)) {
         .@"struct" => {
-            if (ty.containerLayout(zcu) == .@"packed") {
+            if (ty.containerLayout(zcu) == .@"bitpack") {
                 if (ty.bitSize(zcu) > max_byval_size) return .memory;
                 return .byval;
             }
 
-            if (target.cpu.has(.riscv, .d)) fields: {
+            if (target.abi.float() == .hard64) fields: {
                 var any_fp = false;
                 var field_count: usize = 0;
                 for (0..ty.structFieldCount(zcu)) |field_index| {
@@ -45,7 +45,7 @@ pub fn classifyType(ty: Type, zcu: *Zcu) Class {
             return .integer;
         },
         .@"union" => {
-            if (ty.containerLayout(zcu) == .@"packed") {
+            if (ty.containerLayout(zcu) == .@"bitpack") {
                 if (ty.bitSize(zcu) > max_byval_size) return .memory;
                 return .byval;
             }
@@ -152,7 +152,7 @@ pub fn classifySystem(ty: Type, zcu: *Zcu) [8]SystemClass {
             const target = zcu.getTarget();
 
             const float_bits = ty.floatBits(target);
-            const float_reg_size: u32 = if (target.cpu.has(.riscv, .d)) 64 else 32;
+            const float_reg_size: u32 = if (target.abi.float() == .hard64) 64 else 32;
             if (float_bits <= float_reg_size) {
                 result[0] = .float;
                 return result;
@@ -174,7 +174,7 @@ pub fn classifySystem(ty: Type, zcu: *Zcu) [8]SystemClass {
             const layout = ty.containerLayout(zcu);
             const ty_size = ty.abiSize(zcu);
 
-            if (layout == .@"packed") {
+            if (layout == .@"bitpack") {
                 assert(ty_size <= 16);
                 result[0] = .integer;
                 if (ty_size > 8) result[1] = .integer;
@@ -229,7 +229,7 @@ fn classifyStruct(
             field_align.toByteUnits() orelse field_ty.abiAlignment(zcu).toByteUnits().?,
         );
         if (zcu.typeToStruct(field_ty)) |field_loaded_struct| {
-            if (field_loaded_struct.layout != .@"packed") {
+            if (field_loaded_struct.layout != .@"bitpack") {
                 classifyStruct(result, byte_offset, field_loaded_struct, zcu);
                 continue;
             }

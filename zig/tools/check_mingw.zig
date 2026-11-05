@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     defer mingw_libcommon_dir.close(io);
 
     var walker = try mingw_libcommon_dir.walk(arena);
-    defer walker.deinit();
+    defer walker.deinit(io);
 
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
@@ -41,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
 
             const aro = pp: {
                 const target_triple = try target.zigTriple(pp_arena);
-                const target_arg = try std.fmt.allocPrint(pp_arena, "--target={s}", .{target_triple});
+                const target_arg = try pp_arena.print("--target={s}", .{target_triple});
                 const result = std.process.run(pp_arena, io, .{
                     .argv = &.{
                         "arocc",

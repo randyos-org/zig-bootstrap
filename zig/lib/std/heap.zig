@@ -544,13 +544,13 @@ pub fn testAllocatorAlignedShrink(base_allocator: mem.Allocator) !void {
     var slice = try allocator.alignedAlloc(u8, .@"16", alloc_size);
     defer allocator.free(slice);
 
-    var stuff_to_free = std.array_list.Managed([]align(16) u8).init(debug_allocator);
+    var stuff_to_free: std.ArrayList([]align(16) u8) = .empty;
     // On Windows, VirtualAlloc returns addresses aligned to a 64K boundary,
     // which is 16 pages, hence the 32. This test may require to increase
     // the size of the allocations feeding the `allocator` parameter if they
     // fail, because of this high over-alignment we want to have.
     while (@intFromPtr(slice.ptr) == mem.alignForward(usize, @intFromPtr(slice.ptr), pageSize() * 32)) {
-        try stuff_to_free.append(slice);
+        try stuff_to_free.append(debug_allocator, slice);
         slice = try allocator.alignedAlloc(u8, .@"16", alloc_size);
     }
     while (stuff_to_free.pop()) |item| {
@@ -573,12 +573,7 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
     .windows => switch (builtin.cpu.arch) {
         // -- <https://devblogs.microsoft.com/oldnewthing/20210510-00/?p=105200>
         .x86, .x86_64 => 4 << 10,
-        // SuperH => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 4 << 10,
-        .powerpc, .powerpcle, .powerpc64, .powerpc64le => 4 << 10,
-        // DEC Alpha => 8 << 10,
-        // Itanium => 8 << 10,
-        .thumb, .thumbeb, .arm, .armeb, .aarch64, .aarch64_be => 4 << 10,
+        .thumb, .aarch64 => 4 << 10,
         else => null,
     },
     .wasi => switch (builtin.cpu.arch) {
@@ -589,22 +584,22 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
     .uefi => 4 << 10,
     .freebsd => switch (builtin.cpu.arch) {
         // FreeBSD/sys/*
-        .x86, .x86_64 => 4 << 10,
-        .thumb, .thumbeb, .arm, .armeb => 4 << 10,
-        .aarch64, .aarch64_be => 4 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
-        .riscv32, .riscv64 => 4 << 10,
+        .x86_64 => 4 << 10,
+        .arm => 4 << 10,
+        .aarch64 => 4 << 10,
+        .powerpc64, .powerpc64le => 4 << 10,
+        .riscv64 => 4 << 10,
         else => null,
     },
     .netbsd => switch (builtin.cpu.arch) {
         // NetBSD/sys/arch/*
         .alpha => 8 << 10,
         .x86, .x86_64 => 4 << 10,
-        .thumb, .thumbeb, .arm, .armeb => 4 << 10,
+        .arm, .armeb => 4 << 10,
         .aarch64, .aarch64_be => 4 << 10,
         .hppa => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 4 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
+        .mips, .mipsel, .mipsf32, .mipsf32el, .mips64, .mips64el => 4 << 10,
+        .powerpc => 4 << 10,
         .sh, .sheb => 4 << 10,
         .sparc => 4 << 10,
         .sparc64 => 8 << 10,
@@ -614,7 +609,7 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
         else => null,
     },
     .dragonfly => switch (builtin.cpu.arch) {
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .openbsd => switch (builtin.cpu.arch) {
@@ -622,45 +617,46 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
         .alpha => 8 << 10,
         .hppa => 4 << 10,
         .x86, .x86_64 => 4 << 10,
-        .thumb, .thumbeb, .arm, .armeb, .aarch64, .aarch64_be => 4 << 10,
+        .arm, .aarch64 => 4 << 10,
         .m88k => 4 << 10,
-        .mips64, .mips64el => 4 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
+        .mips64 => 4 << 10,
+        .powerpc, .powerpc64 => 4 << 10,
         .riscv64 => 4 << 10,
-        .sh, .sheb => 4 << 10,
+        .sh => 4 << 10,
         .sparc64 => 8 << 10,
         else => null,
     },
     .illumos => switch (builtin.cpu.arch) {
         // src/uts/*/sys/machparam.h
-        .x86, .x86_64 => 4 << 10,
-        .sparc, .sparc64 => 8 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .fuchsia => switch (builtin.cpu.arch) {
         // fuchsia/kernel/arch/*/include/arch/defines.h
         .x86_64 => 4 << 10,
-        .aarch64, .aarch64_be => 4 << 10,
+        .aarch64 => 4 << 10,
+        .arm, .thumb => 4 << 10,
         .riscv64 => 4 << 10,
         else => null,
     },
     // https://github.com/SerenityOS/serenity/blob/62b938b798dc009605b5df8a71145942fc53808b/Kernel/API/POSIX/sys/limits.h#L11-L13
-    .serenity => 4 << 10,
+    .serenity => switch (builtin.cpu.arch) {
+        .aarch64 => 4 << 10,
+        .riscv64 => 4 << 10,
+        .x86_64 => 4 << 10,
+        else => null,
+    },
     .haiku => switch (builtin.cpu.arch) {
         // haiku/headers/posix/arch/*/limits.h
-        .thumb, .thumbeb, .arm, .armeb => 4 << 10,
-        .aarch64, .aarch64_be => 4 << 10,
-        .m68k => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 4 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
+        .arm => 4 << 10,
+        .aarch64 => 4 << 10,
         .riscv64 => 4 << 10,
-        .sparc64 => 8 << 10,
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .hurd => switch (builtin.cpu.arch) {
         // gnumach/*/include/mach/*/vm_param.h
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         .aarch64 => null,
         else => null,
     },
@@ -681,17 +677,17 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
     },
     .ps4 => switch (builtin.cpu.arch) {
         // https://github.com/ps4dev/ps4sdk/blob/4df9d001b66ae4ec07d9a51b62d1e4c5e270eecc/include/machine/param.h#L95
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .ps5 => switch (builtin.cpu.arch) {
         // https://github.com/PS5Dev/PS5SDK/blob/a2e03a2a0231a3a3397fa6cd087a01ca6d04f273/include/machine/param.h#L95
-        .x86, .x86_64 => 16 << 10,
+        .x86_64 => 16 << 10,
         else => null,
     },
     .psp => switch (builtin.cpu.arch) {
         // minimum block allocation by testing sceKernel
-        .mips, .mipsel => 1 << 8, // 256
+        .mipsel => 1 << 8, // 256
         else => null,
     },
     // system/lib/libc/musl/arch/emscripten/bits/limits.h
@@ -708,7 +704,25 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
         .loongarch32, .loongarch64 => 4 << 10,
         .m68k => 4 << 10,
         .microblaze, .microblazeel => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 4 << 10,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => 4 << 10,
         .or1k => 8 << 10,
         .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
         .riscv32, .riscv64 => 4 << 10,
@@ -722,7 +736,7 @@ const page_size_min_default: ?usize = switch (builtin.os.tag) {
     },
     .freestanding, .other => switch (builtin.cpu.arch) {
         .wasm32, .wasm64 => 64 << 10,
-        .x86, .x86_64 => 4 << 10,
+        .x86, .x86c16, .x86_64 => 4 << 10,
         .aarch64, .aarch64_be => 4 << 10,
         else => null,
     },
@@ -738,12 +752,7 @@ const page_size_max_default: ?usize = switch (builtin.os.tag) {
     .windows => switch (builtin.cpu.arch) {
         // -- <https://devblogs.microsoft.com/oldnewthing/20210510-00/?p=105200>
         .x86, .x86_64 => 4 << 10,
-        // SuperH => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 4 << 10,
-        .powerpc, .powerpcle, .powerpc64, .powerpc64le => 4 << 10,
-        // DEC Alpha => 8 << 10,
-        // Itanium => 8 << 10,
-        .thumb, .thumbeb, .arm, .armeb, .aarch64, .aarch64_be => 4 << 10,
+        .thumb, .aarch64 => 4 << 10,
         else => null,
     },
     .wasi => switch (builtin.cpu.arch) {
@@ -754,22 +763,22 @@ const page_size_max_default: ?usize = switch (builtin.os.tag) {
     .uefi => 4 << 10,
     .freebsd => switch (builtin.cpu.arch) {
         // FreeBSD/sys/*
-        .x86, .x86_64 => 4 << 10,
-        .thumb, .thumbeb, .arm, .armeb => 4 << 10,
-        .aarch64, .aarch64_be => 4 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
-        .riscv32, .riscv64 => 4 << 10,
+        .x86_64 => 4 << 10,
+        .arm => 4 << 10,
+        .aarch64 => 4 << 10,
+        .powerpc64, .powerpc64le => 4 << 10,
+        .riscv64 => 4 << 10,
         else => null,
     },
     .netbsd => switch (builtin.cpu.arch) {
         // NetBSD/sys/arch/*
         .alpha => 8 << 10,
         .x86, .x86_64 => 4 << 10,
-        .thumb, .thumbeb, .arm, .armeb => 4 << 10,
+        .arm, .armeb => 4 << 10,
         .aarch64, .aarch64_be => 64 << 10,
         .hppa => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 16 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 16 << 10,
+        .mips, .mipsel, .mipsf32, .mipsf32el, .mips64, .mips64el => 16 << 10,
+        .powerpc, .powerpcle => 16 << 10,
         .sh, .sheb => 4 << 10,
         .sparc => 8 << 10,
         .sparc64 => 8 << 10,
@@ -778,7 +787,7 @@ const page_size_max_default: ?usize = switch (builtin.os.tag) {
         else => null,
     },
     .dragonfly => switch (builtin.cpu.arch) {
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .openbsd => switch (builtin.cpu.arch) {
@@ -786,45 +795,46 @@ const page_size_max_default: ?usize = switch (builtin.os.tag) {
         .alpha => 8 << 10,
         .hppa => 4 << 10,
         .x86, .x86_64 => 4 << 10,
-        .thumb, .thumbeb, .arm, .armeb, .aarch64, .aarch64_be => 4 << 10,
+        .arm, .aarch64 => 4 << 10,
         .m88k => 4 << 10,
-        .mips64, .mips64el => 16 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
+        .mips64 => 16 << 10,
+        .powerpc, .powerpc64 => 4 << 10,
         .riscv64 => 4 << 10,
-        .sh, .sheb => 4 << 10,
+        .sh => 4 << 10,
         .sparc64 => 8 << 10,
         else => null,
     },
     .illumos => switch (builtin.cpu.arch) {
         // src/uts/*/sys/machparam.h
-        .x86, .x86_64 => 4 << 10,
-        .sparc, .sparc64 => 8 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .fuchsia => switch (builtin.cpu.arch) {
         // fuchsia/kernel/arch/*/include/arch/defines.h
         .x86_64 => 4 << 10,
-        .aarch64, .aarch64_be => 4 << 10,
+        .aarch64 => 4 << 10,
+        .arm, .thumb => 4 << 10,
         .riscv64 => 4 << 10,
         else => null,
     },
     // https://github.com/SerenityOS/serenity/blob/62b938b798dc009605b5df8a71145942fc53808b/Kernel/API/POSIX/sys/limits.h#L11-L13
-    .serenity => 4 << 10,
+    .serenity => switch (builtin.cpu.arch) {
+        .x86_64 => 4 << 10,
+        .aarch64 => 4 << 10,
+        .riscv64 => 4 << 10,
+        else => null,
+    },
     .haiku => switch (builtin.cpu.arch) {
         // haiku/headers/posix/arch/*/limits.h
-        .thumb, .thumbeb, .arm, .armeb => 4 << 10,
-        .aarch64, .aarch64_be => 4 << 10,
-        .m68k => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 4 << 10,
-        .powerpc, .powerpc64, .powerpc64le, .powerpcle => 4 << 10,
+        .arm => 4 << 10,
+        .aarch64 => 4 << 10,
         .riscv64 => 4 << 10,
-        .sparc64 => 8 << 10,
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .hurd => switch (builtin.cpu.arch) {
         // gnumach/*/include/mach/*/vm_param.h
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         .aarch64 => null,
         else => null,
     },
@@ -845,17 +855,17 @@ const page_size_max_default: ?usize = switch (builtin.os.tag) {
     },
     .ps4 => switch (builtin.cpu.arch) {
         // https://github.com/ps4dev/ps4sdk/blob/4df9d001b66ae4ec07d9a51b62d1e4c5e270eecc/include/machine/param.h#L95
-        .x86, .x86_64 => 4 << 10,
+        .x86_64 => 4 << 10,
         else => null,
     },
     .ps5 => switch (builtin.cpu.arch) {
         // https://github.com/PS5Dev/PS5SDK/blob/a2e03a2a0231a3a3397fa6cd087a01ca6d04f273/include/machine/param.h#L95
-        .x86, .x86_64 => 16 << 10,
+        .x86_64 => 16 << 10,
         else => null,
     },
     .psp => switch (builtin.cpu.arch) {
         // minimum block allocation by testing sceKernel
-        .mips, .mipsel => 1 << 8, // 256
+        .mipsel => 1 << 8, // 256
         else => null,
     },
     // system/lib/libc/musl/arch/emscripten/bits/limits.h
@@ -872,7 +882,25 @@ const page_size_max_default: ?usize = switch (builtin.os.tag) {
         .loongarch32, .loongarch64 => 64 << 10,
         .m68k => 8 << 10,
         .microblaze, .microblazeel => 4 << 10,
-        .mips, .mipsel, .mips64, .mips64el => 64 << 10,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => 64 << 10,
         .or1k => 8 << 10,
         .powerpc, .powerpc64, .powerpc64le, .powerpcle => 256 << 10,
         .riscv32, .riscv64 => 4 << 10,

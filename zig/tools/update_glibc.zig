@@ -47,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
     const glibc_src_path = args[1];
     const zig_src_path = args[2];
 
-    const dest_dir_path = try std.fmt.allocPrint(arena, "{s}/lib/libc/glibc", .{zig_src_path});
+    const dest_dir_path = try arena.print("{s}/lib/libc/glibc", .{zig_src_path});
 
     var dest_dir = Dir.cwd().openDir(io, dest_dir_path, .{ .iterate = true }) catch |err| {
         fatal("unable to open destination directory '{s}': {t}", .{ dest_dir_path, err });
@@ -60,7 +60,7 @@ pub fn main(init: std.process.Init) !void {
     // Copy updated files from upstream.
     {
         var walker = try dest_dir.walk(arena);
-        defer walker.deinit();
+        defer walker.deinit(io);
 
         walk: while (try walker.next(io)) |entry| {
             if (entry.kind != .file) continue;
@@ -91,8 +91,7 @@ pub fn main(init: std.process.Init) !void {
     };
     defer include_dir.close(io);
 
-    const generic_glibc_path = try std.fmt.allocPrint(
-        arena,
+    const generic_glibc_path = try arena.print(
         "{s}/lib/libc/include/generic-glibc",
         .{zig_src_path},
     );
@@ -100,7 +99,7 @@ pub fn main(init: std.process.Init) !void {
     defer generic_glibc_dir.close(io);
 
     var walker = try include_dir.walk(arena);
-    defer walker.deinit();
+    defer walker.deinit(io);
 
     walk: while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;

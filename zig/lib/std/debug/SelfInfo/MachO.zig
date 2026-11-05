@@ -11,11 +11,11 @@ pub fn deinit(si: *SelfInfo, io: Io) void {
     const gpa = std.debug.getDebugInfoAllocator();
     for (si.modules.keys()) |*module| {
         unwind: {
-            const u = &(module.unwind orelse break :unwind catch break :unwind);
+            const u = &((module.unwind orelse break :unwind) catch break :unwind);
             if (u.dwarf) |*dwarf| dwarf.deinit(gpa);
         }
         file: {
-            const f = &(module.file orelse break :file catch break :file);
+            const f = &((module.file orelse break :file) catch break :file);
             f.deinit(gpa);
         }
     }
@@ -451,7 +451,7 @@ fn unwindFrameInner(si: *SelfInfo, io: Io, context: *UnwindContext) !usize {
         else => comptime unreachable, // unimplemented
     };
 
-    const ret_addr = std.debug.stripInstructionPtrAuthCode(new_ip);
+    const ret_addr = std.debug.stripInstructionPtrMarkerBits(new_ip);
 
     // Like `Dwarf.SelfUnwinder.next`, adjust our next lookup pc in case the `call` was this
     // function's last instruction making `ret_addr` one byte past its end.

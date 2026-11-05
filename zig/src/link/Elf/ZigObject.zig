@@ -224,7 +224,7 @@ pub fn init(self: *ZigObject, elf_file: *Elf, options: InitOptions) !void {
             try dwarf.initMetadata();
             self.dwarf = dwarf;
         },
-        .code_view => unreachable,
+        .code_view, .nsdi => unreachable,
     }
 }
 
@@ -291,7 +291,7 @@ pub fn flush(self: *ZigObject, elf_file: *Elf, tid: Zcu.PerThread.Id) !void {
         if (metadata.rodata_state != .unused) metadata.rodata_state = .flushed;
     }
 
-    if (build_options.enable_logging) {
+    if (build_options.enable_debug_extensions) {
         const active = elf_file.base.comp.zcu.?.activate(tid);
         defer active.deactivate();
         for (self.navs.keys(), self.navs.values()) |nav_index, meta| {
@@ -803,7 +803,7 @@ pub fn initRelaSections(self: *ZigObject, elf_file: *Elf) !void {
         const out_shndx = atom_ptr.output_section_index;
         const out_shdr = elf_file.sections.items(.shdr)[out_shndx];
         if (out_shdr.sh_type == elf.SHT_NOBITS) continue;
-        const rela_sect_name = try std.fmt.allocPrintSentinel(gpa, ".rela{s}", .{
+        const rela_sect_name = try gpa.printSentinel(".rela{s}", .{
             elf_file.getShString(out_shdr.sh_name),
         }, 0);
         defer gpa.free(rela_sect_name);
@@ -824,7 +824,7 @@ pub fn addAtomsToRelaSections(self: *ZigObject, elf_file: *Elf) !void {
         const out_shndx = atom_ptr.output_section_index;
         const out_shdr = elf_file.sections.items(.shdr)[out_shndx];
         if (out_shdr.sh_type == elf.SHT_NOBITS) continue;
-        const rela_sect_name = try std.fmt.allocPrintSentinel(gpa, ".rela{s}", .{
+        const rela_sect_name = try gpa.printSentinel(".rela{s}", .{
             elf_file.getShString(out_shdr.sh_name),
         }, 0);
         defer gpa.free(rela_sect_name);
@@ -1410,11 +1410,11 @@ fn updateNavCode(
     if (elf_file.base.child_pid) |pid| {
         switch (builtin.os.tag) {
             .linux => {
-                var code_vec: [1]std.posix.iovec_const = .{.{
+                var code_vec: [1]std.os.linux.iovec_const = .{.{
                     .base = code.ptr,
                     .len = code.len,
                 }};
-                var remote_vec: [1]std.posix.iovec_const = .{.{
+                var remote_vec: [1]std.os.linux.iovec_const = .{.{
                     .base = @as([*]u8, @ptrFromInt(@as(usize, @intCast(sym.address(.{}, elf_file))))),
                     .len = code.len,
                 }};
@@ -1572,7 +1572,7 @@ pub fn updateFunc(
 
         // Create a trampoline to the new location at `old_rva`.
         if (!self.symbol(sym_index).flags.has_trampoline) {
-            const name = try std.fmt.allocPrint(gpa, "{s}$trampoline", .{
+            const name = try gpa.print("{s}$trampoline", .{
                 self.symbol(sym_index).name(elf_file),
             });
             defer gpa.free(name);
@@ -1718,7 +1718,7 @@ fn updateLazySymbol(
     defer aw.deinit();
 
     const name_str_index = blk: {
-        const name = try std.fmt.allocPrint(gpa, "__lazy_{s}_{f}", .{
+        const name = try gpa.print("__lazy_{s}_{f}", .{
             @tagName(sym.kind),
             Type.fromInterned(sym.ty).fmt(zcu),
         });
@@ -1980,11 +1980,11 @@ fn writeTrampoline(tr_sym: Symbol, target: Symbol, elf_file: *Elf) !void {
     if (elf_file.base.child_pid) |pid| {
         switch (builtin.os.tag) {
             .linux => {
-                var local_vec: [1]std.posix.iovec_const = .{.{
+                var local_vec: [1]std.os.linux.iovec_const = .{.{
                     .base = out.ptr,
                     .len = out.len,
                 }};
-                var remote_vec: [1]std.posix.iovec_const = .{.{
+                var remote_vec: [1]std.os.linux.iovec_const = .{.{
                     .base = @as([*]u8, @ptrFromInt(@as(usize, @intCast(source_addr)))),
                     .len = out.len,
                 }};

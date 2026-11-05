@@ -62,17 +62,17 @@ pub fn findByMnemonic(
             .none => true,
             .@"32bit" => switch (target.cpu.arch) {
                 else => unreachable,
-                .x86 => true,
+                .x86, .x86c16 => true,
                 .x86_64 => false,
             },
             .@"64bit" => switch (target.cpu.arch) {
                 else => unreachable,
-                .x86 => false,
+                .x86, .x86c16 => false,
                 .x86_64 => true,
             },
             inline .@"invpcid 32bit", .@"rdpid 32bit" => |tag| switch (target.cpu.arch) {
                 else => unreachable,
-                .x86 => target.cpu.has(
+                .x86, .x86c16 => target.cpu.has(
                     .x86,
                     @field(std.Target.x86.Feature, @tagName(tag)[0 .. @tagName(tag).len - " 32bit".len]),
                 ),
@@ -80,7 +80,7 @@ pub fn findByMnemonic(
             },
             inline .@"invpcid 64bit", .@"rdpid 64bit", .@"prefetchi 64bit" => |tag| switch (target.cpu.arch) {
                 else => unreachable,
-                .x86 => false,
+                .x86, .x86c16 => false,
                 .x86_64 => target.cpu.has(
                     .x86,
                     @field(std.Target.x86.Feature, @tagName(tag)[0 .. @tagName(tag).len - " 64bit".len]),
@@ -949,7 +949,7 @@ pub const Feature = enum {
     clflushopt,
     clwb,
     cmov,
-    @"cmov x87",
+    @"cmov 387",
     crc32,
     enqcmd,
     f16c,
@@ -984,7 +984,7 @@ pub const Feature = enum {
     sse,
     sse2,
     sse3,
-    @"sse3 x87",
+    @"sse3 387",
     sse4_1,
     sse4_2,
     ssse3,
@@ -994,7 +994,7 @@ pub const Feature = enum {
     vpclmulqdq,
     waitpkg,
     widekl,
-    x87,
+    @"387",
 };
 
 fn estimateInstructionLength(prefix: Prefix, encoding: Encoding, ops: []const Operand) usize {

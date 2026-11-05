@@ -5,7 +5,7 @@
 //! `std.process`.
 //!
 //! These APIs are generally lowered to libc function calls if and only if libc
-//! is linked. Most operating systems other than Windows, Linux, and WASI
+//! is linked. Most operating systems other than Linux and WASI
 //! require always linking libc because they use it as the stable syscall ABI.
 const builtin = @import("builtin");
 const native_os = builtin.os.tag;
@@ -19,21 +19,19 @@ const assert = std.debug.assert;
 const page_size_min = std.heap.page_size_min;
 
 test {
-    _ = @import("posix/test.zig");
+    if (native_os != .windows) _ = @import("posix/test.zig");
 }
 
 /// Whether to use libc for the POSIX API layer.
-const use_libc = builtin.link_libc or switch (native_os) {
-    .windows => true,
-    else => false,
-};
+const use_libc = builtin.link_libc;
 
 const linux = std.os.linux;
-const windows = std.os.windows;
 const wasi = std.os.wasi;
 
 /// A libc-compatible API layer.
-pub const system = if (use_libc)
+pub const system = if (native_os == .windows)
+    @compileError("Windows does not support POSIX")
+else if (use_libc)
     std.c
 else switch (native_os) {
     .linux => linux,
@@ -134,14 +132,11 @@ pub const STDIN_FILENO = system.STDIN_FILENO;
 pub const STDOUT_FILENO = system.STDOUT_FILENO;
 pub const SYS = system.SYS;
 pub const Sigaction = system.Sigaction;
-/// Windows has no concept of `stat`.
-///
 /// On Linux, the `stat` bits/wrappers are removed due to having to maintain
 /// the different varying stat structs per target and libc, leading to runtime
 /// errors. Users targeting Linux should add a comptime check and use statx,
 /// similar to how `Io.File.stat` does.
 pub const Stat = switch (native_os) {
-    .windows => void,
     .linux => void,
     else => system.Stat,
 };
@@ -218,81 +213,16 @@ pub const R_OK = system.R_OK;
 pub const W_OK = system.W_OK;
 pub const X_OK = system.X_OK;
 
-pub const iovec = extern struct {
-    base: [*]u8,
-    len: usize,
-};
+pub const iovec = system.iovec;
+pub const iovec_const = system.iovec_const;
 
-pub const iovec_const = extern struct {
-    base: [*]const u8,
-    len: usize,
-};
+pub const ACCMODE = system.ACCMODE;
+pub const TCSA = system.TCSA;
+pub const winsize = system.winsize;
 
-pub const ACCMODE = switch (native_os) {
-    // POSIX has a note about the access mode values:
-    //
-    // In historical implementations the value of O_RDONLY is zero. Because of
-    // that, it is not possible to detect the presence of O_RDONLY and another
-    // option. Future implementations should encode O_RDONLY and O_WRONLY as
-    // bit flags so that: O_RDONLY | O_WRONLY == O_RDWR
-    //
-    // In practice SerenityOS is the only system supported by Zig that
-    // implements this suggestion.
-    // https://github.com/SerenityOS/serenity/blob/4adc51fdf6af7d50679c48b39362e062f5a3b2cb/Kernel/API/POSIX/fcntl.h#L28-L30
-    .serenity => enum(u2) {
-        NONE = 0,
-        RDONLY = 1,
-        WRONLY = 2,
-        RDWR = 3,
-    },
-    else => enum(u2) {
-        RDONLY = 0,
-        WRONLY = 1,
-        RDWR = 2,
-    },
-};
+pub const LOCK = system.LOCK;
 
-pub const TCSA = enum(c_uint) {
-    NOW,
-    DRAIN,
-    FLUSH,
-    _,
-};
-
-pub const winsize = extern struct {
-    row: u16,
-    col: u16,
-    xpixel: u16,
-    ypixel: u16,
-};
-
-pub const LOCK = struct {
-    pub const SH = 1;
-    pub const EX = 2;
-    pub const NB = 4;
-    pub const UN = 8;
-};
-
-pub const LOG = struct {
-    /// system is unusable
-    pub const EMERG = 0;
-    /// action must be taken immediately
-    pub const ALERT = 1;
-    /// critical conditions
-    pub const CRIT = 2;
-    /// error conditions
-    pub const ERR = 3;
-    /// warning conditions
-    pub const WARNING = 4;
-    /// normal but significant condition
-    pub const NOTICE = 5;
-    /// informational
-    pub const INFO = 6;
-    /// debug-level messages
-    pub const DEBUG = 7;
-};
-
-pub const socket_t = fd_t;
+pub const socket_t = system.socket_t;
 
 /// Obtains errno from the return value of a system function call.
 ///
@@ -406,7 +336,6 @@ pub const ReadError = std.Io.File.Reader.Error;
 /// The corresponding POSIX limit is `maxInt(isize)`.
 pub fn read(fd: fd_t, buf: []u8) ReadError!usize {
     if (buf.len == 0) return 0;
-    if (native_os == .windows) @compileError("unsupported OS");
     if (native_os == .wasi) @compileError("unsupported OS");
 
     // Prevents EINVAL.
@@ -441,14 +370,11 @@ pub const OpenError = std.Io.File.OpenError || error{WouldBlock};
 
 /// Open and possibly create a file. Keeps trying if it gets interrupted.
 /// `file_path` is relative to the open directory handle `dir_fd`.
-/// On Windows, `file_path` should be encoded as [WTF-8](https://wtf-8.codeberg.page/).
 /// On WASI, `file_path` should be encoded as valid UTF-8.
 /// On other platforms, `file_path` is an opaque sequence of bytes with no particular encoding.
 /// See also `openatZ`.
 pub fn openat(dir_fd: fd_t, file_path: []const u8, flags: O, mode: mode_t) OpenError!fd_t {
-    if (native_os == .windows) {
-        @compileError("Windows does not support POSIX; use Windows-specific API or cross-platform std.fs API");
-    } else if (native_os == .wasi) {
+    if (native_os == .wasi) {
         @compileError("use std.Io instead");
     }
     const file_path_c = try toPosixPath(file_path);
@@ -457,14 +383,11 @@ pub fn openat(dir_fd: fd_t, file_path: []const u8, flags: O, mode: mode_t) OpenE
 
 /// Open and possibly create a file. Keeps trying if it gets interrupted.
 /// `file_path` is relative to the open directory handle `dir_fd`.
-/// On Windows, `file_path` should be encoded as [WTF-8](https://wtf-8.codeberg.page/).
 /// On WASI, `file_path` should be encoded as valid UTF-8.
 /// On other platforms, `file_path` is an opaque sequence of bytes with no particular encoding.
 /// See also `openat`.
 pub fn openatZ(dir_fd: fd_t, file_path: [*:0]const u8, flags: O, mode: mode_t) OpenError!fd_t {
-    if (native_os == .windows) {
-        @compileError("Windows does not support POSIX; use Windows-specific API or cross-platform std.fs API");
-    } else if (native_os == .wasi) {
+    if (native_os == .wasi) {
         return openat(dir_fd, mem.sliceTo(file_path, 0), flags, mode);
     }
 
@@ -526,21 +449,17 @@ pub const GetSockNameError = error{
 } || UnexpectedError;
 
 pub fn getpeername(sock: socket_t, addr: *sockaddr, addrlen: *socklen_t) GetSockNameError!void {
-    if (native_os == .windows) {
-        @compileError("use std.Io instead");
-    } else {
-        const rc = system.getpeername(sock, addr, addrlen);
-        switch (errno(rc)) {
-            .SUCCESS => return,
-            else => |err| return unexpectedErrno(err),
+    const rc = system.getpeername(sock, addr, addrlen);
+    switch (errno(rc)) {
+        .SUCCESS => return,
+        else => |err| return unexpectedErrno(err),
 
-            .BADF => unreachable, // always a race condition
-            .FAULT => unreachable,
-            .INVAL => unreachable, // invalid parameters
-            .NOTSOCK => return error.FileDescriptorNotASocket,
-            .NOBUFS => return error.SystemResources,
-            .NOTCONN => return error.SocketUnconnected,
-        }
+        .BADF => unreachable, // always a race condition
+        .FAULT => unreachable,
+        .INVAL => unreachable, // invalid parameters
+        .NOTSOCK => return error.FileDescriptorNotASocket,
+        .NOBUFS => return error.SystemResources,
+        .NOTCONN => return error.SocketUnconnected,
     }
 }
 
@@ -797,7 +716,7 @@ pub fn dl_iterate_phdr(
     const dl = @import("dynamic_library.zig");
 
     switch (builtin.object_format) {
-        .elf, .c => {},
+        .c, .elf, .llvmbc, .llvmir => {},
         else => @compileError("dl_iterate_phdr is not available for this target"),
     }
 
@@ -1008,9 +927,6 @@ pub const PollError = error{
 } || UnexpectedError;
 
 pub fn poll(fds: []pollfd, timeout: i32) PollError!usize {
-    if (native_os == .windows) {
-        @compileError("use std.Io instead");
-    }
     while (true) {
         const fds_count = cast(nfds_t, fds.len) orelse return error.SystemResources;
         const rc = system.poll(fds.ptr, fds_count, timeout);
@@ -1078,25 +994,21 @@ pub const SetSockOptError = error{
 
 /// Set a socket's options.
 pub fn setsockopt(fd: socket_t, level: i32, optname: u32, opt: []const u8) SetSockOptError!void {
-    if (native_os == .windows) {
-        @compileError("use std.Io instead");
-    } else {
-        switch (errno(system.setsockopt(fd, level, optname, opt.ptr, @intCast(opt.len)))) {
-            .SUCCESS => {},
-            .BADF => unreachable, // always a race condition
-            .NOTSOCK => unreachable, // always a race condition
-            .INVAL => unreachable,
-            .FAULT => unreachable,
-            .DOM => return error.TimeoutTooBig,
-            .ISCONN => return error.AlreadyConnected,
-            .NOPROTOOPT => return error.InvalidProtocolOption,
-            .NOMEM => return error.SystemResources,
-            .NOBUFS => return error.SystemResources,
-            .PERM => return error.PermissionDenied,
-            .NODEV => return error.NoDevice,
-            .OPNOTSUPP => return error.OperationUnsupported,
-            else => |err| return unexpectedErrno(err),
-        }
+    switch (errno(system.setsockopt(fd, level, optname, opt.ptr, @intCast(opt.len)))) {
+        .SUCCESS => {},
+        .BADF => unreachable, // always a race condition
+        .NOTSOCK => unreachable, // always a race condition
+        .INVAL => unreachable,
+        .FAULT => unreachable,
+        .DOM => return error.TimeoutTooBig,
+        .ISCONN => return error.AlreadyConnected,
+        .NOPROTOOPT => return error.InvalidProtocolOption,
+        .NOMEM => return error.SystemResources,
+        .NOBUFS => return error.SystemResources,
+        .PERM => return error.PermissionDenied,
+        .NODEV => return error.NoDevice,
+        .OPNOTSUPP => return error.OperationUnsupported,
+        else => |err| return unexpectedErrno(err),
     }
 }
 
@@ -1527,7 +1439,6 @@ pub const PtraceError = error{
 
 pub fn ptrace(request: u32, pid: pid_t, addr: usize, data: usize) PtraceError!void {
     return switch (native_os) {
-        .windows,
         .wasi,
         .emscripten,
         .haiku,

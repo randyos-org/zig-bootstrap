@@ -101,7 +101,7 @@ pub const io_uring_sqe = extern struct {
     pub fn prep_readv(
         sqe: *linux.io_uring_sqe,
         fd: linux.fd_t,
-        iovecs: []const std.posix.iovec,
+        iovecs: []const linux.iovec,
         offset: u64,
     ) void {
         sqe.prep_rw(.READV, fd, @intFromPtr(iovecs.ptr), iovecs.len, offset);
@@ -110,18 +110,18 @@ pub const io_uring_sqe = extern struct {
     pub fn prep_writev(
         sqe: *linux.io_uring_sqe,
         fd: linux.fd_t,
-        iovecs: []const std.posix.iovec_const,
+        iovecs: []const linux.iovec_const,
         offset: u64,
     ) void {
         sqe.prep_rw(.WRITEV, fd, @intFromPtr(iovecs.ptr), iovecs.len, offset);
     }
 
-    pub fn prep_read_fixed(sqe: *linux.io_uring_sqe, fd: linux.fd_t, buffer: *std.posix.iovec, offset: u64, buffer_index: u16) void {
+    pub fn prep_read_fixed(sqe: *linux.io_uring_sqe, fd: linux.fd_t, buffer: *linux.iovec, offset: u64, buffer_index: u16) void {
         sqe.prep_rw(.READ_FIXED, fd, @intFromPtr(buffer.base), buffer.len, offset);
         sqe.buf_index = buffer_index;
     }
 
-    pub fn prep_write_fixed(sqe: *linux.io_uring_sqe, fd: linux.fd_t, buffer: *std.posix.iovec, offset: u64, buffer_index: u16) void {
+    pub fn prep_write_fixed(sqe: *linux.io_uring_sqe, fd: linux.fd_t, buffer: *linux.iovec, offset: u64, buffer_index: u16) void {
         sqe.prep_rw(.WRITE_FIXED, fd, @intFromPtr(buffer.base), buffer.len, offset);
         sqe.buf_index = buffer_index;
     }
@@ -654,7 +654,7 @@ pub const io_uring_sqe = extern struct {
         // off is overloaded with cmd_op, https://github.com/axboe/liburing/blob/e1003e496e66f9b0ae06674869795edf772d5500/src/include/liburing/io_uring.h#L39
         sqe.off = @backingInt(cmd_op);
         // addr is overloaded, https://github.com/axboe/liburing/blob/e1003e496e66f9b0ae06674869795edf772d5500/src/include/liburing/io_uring.h#L46
-        sqe.addr = @bitCast(packed struct {
+        sqe.addr = @bitCast(bitpack struct {
             level: u32,
             optname: u32,
         }{

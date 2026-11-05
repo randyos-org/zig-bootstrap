@@ -159,6 +159,14 @@ test "sigset_t" {
     }
 }
 
+test "sigdelset" {
+    var set = linux.sigemptyset();
+
+    // Deleting an absent signal must leave it absent.
+    linux.sigdelset(&set, linux.SIG.USR1);
+    try expectEqual(false, linux.sigismember(&set, linux.SIG.USR1));
+}
+
 test "sigfillset" {
     // unlike the C library, all the signals are set in the kernel-level fillset
     const sigset = linux.sigfillset();
@@ -174,6 +182,18 @@ test "sigemptyset" {
         const sig = std.enums.fromInt(linux.SIG, i) orelse continue;
         try expectEqual(false, linux.sigismember(&sigset, sig));
     }
+}
+
+test "capget" {
+    // _LINUX_CAPABILITY_VERSION_3, for which the kernel writes two cap_user_data_t
+    const version = 0x20080522;
+    var data: [2]linux.cap_user_data_t = undefined;
+    var header: linux.cap_user_header_t = .{ .version = version, .pid = linux.getpid() };
+    try expectEqual(.SUCCESS, linux.errno(linux.capget(&header, &data[0])));
+
+    // Above the kernel's pid limit, so no such process exists
+    header = .{ .version = version, .pid = std.math.maxInt(linux.pid_t) };
+    try expectEqual(.SRCH, linux.errno(linux.capget(&header, &data[0])));
 }
 
 test "sysinfo" {

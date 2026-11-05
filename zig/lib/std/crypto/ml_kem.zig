@@ -1178,7 +1178,7 @@ const Poly = struct {
         // multiple coefficients in one batch.
 
         const T = switch (builtin.target.cpu.arch) {
-            .x86_64, .x86 => u32, // Generates better code on Intel CPUs
+            .x86_64, .x86, .x86c16 => u32, // Generates better code on Intel CPUs
             .riscv64 => u32, // Work around LLVM miscompiling coefficient extraction with u64 batches https://codeberg.org/ziglang/zig/issues/37128
             else => u64, // u128 might be faster on some other CPUs.
         };
@@ -1264,7 +1264,7 @@ const Poly = struct {
             const b1 = @as(i16, buf[3 * i + 1]);
             const b2 = @as(i16, buf[3 * i + 2]);
             ret.cs[2 * i] = b0 | ((b1 & 0xf) << 8);
-            ret.cs[2 * i + 1] = (b1 >> 4) | b2 << 4;
+            ret.cs[2 * i + 1] = (b1 >> 4) | (b2 << 4);
         }
         return ret;
     }
@@ -1611,6 +1611,8 @@ test "Polynomial packing" {
 }
 
 test "Test inner PKE" {
+    if (builtin.zig_backend == .stage2_c) return error.SkipZigTest;
+
     var seed: [32]u8 = undefined;
     var pt: [32]u8 = undefined;
     for (&seed, &pt, 0..) |*s, *p, i| {
@@ -1632,6 +1634,8 @@ test "Test inner PKE" {
 }
 
 test "Test happy flow" {
+    if (builtin.zig_backend == .stage2_c) return error.SkipZigTest;
+
     var seed: [64]u8 = undefined;
     for (&seed, 0..) |*s, i| {
         s.* = @as(u8, @intCast(i));
@@ -1656,14 +1660,20 @@ test "Test happy flow" {
 // Code to test NIST Known Answer Tests (KAT), see PQCgenKAT.c.
 
 test "NIST KAT test d00.Kyber512" {
+    if (builtin.zig_backend == .stage2_c) return error.SkipZigTest;
+
     try testNistKat(d00.Kyber512, "e9c2bd37133fcb40772f81559f14b1f58dccd1c816701be9ba6214d43baf4547");
 }
 
 test "NIST KAT test d00.Kyber1024" {
+    if (builtin.zig_backend == .stage2_c) return error.SkipZigTest;
+
     try testNistKat(d00.Kyber1024, "89248f2f33f7f4f7051729111f3049c409a933ec904aedadf035f30fa5646cd5");
 }
 
 test "NIST KAT test d00.Kyber768" {
+    if (builtin.zig_backend == .stage2_c) return error.SkipZigTest;
+
     try testNistKat(d00.Kyber768, "a1e122cad3c24bc51622e4c242d8b8acbcd3f618fee4220400605ca8f9ea02c2");
 }
 

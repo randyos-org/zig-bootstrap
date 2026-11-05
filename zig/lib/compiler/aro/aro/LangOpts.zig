@@ -127,7 +127,7 @@ pub const Standard = enum {
     }
 };
 
-pub const ArmLdrex = packed struct(u4) {
+pub const ArmLdrex = bitpack struct(u4) {
     b: bool = false, // byte (8-bit)
     h: bool = false, // half (16-bit)
     w: bool = false, // word (32-bit)
@@ -246,7 +246,7 @@ pub fn setTargetOptions(self: *LangOpts, target: Target) void {
                 const ldrex: ArmLdrex = switch (arm_version) {
                     6 => if (target.cpu.has(.arm, .mclass))
                         .none
-                    else if (target.cpu.has(.arm, .v6k) or target.cpu.has(.arm, .v6kz))
+                    else if (target.cpu.has(.arm, .v6k) and !target.cpu.has(.arm, .v6t2))
                         .all
                     else
                         .{ .w = true },

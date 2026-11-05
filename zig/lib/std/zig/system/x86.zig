@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const Target = std.Target;
 
 /// Only covers EAX for now.
-const Xcr0 = packed struct(u32) {
+const Xcr0 = bitpack struct(u32) {
     x87: bool,
     sse: bool,
     avx: bool,
@@ -81,7 +81,7 @@ pub fn detectNativeCpuAndFeatures(arch: Target.Cpu.Arch) Target.Cpu {
             // CPU model that never had long mode in reality. We've seen this in practice with
             // athlon_xp (AMD K7). Catch this contradiction and fall back to using a generic CPU
             // model with the features we detected earlier.
-            if (cpu.has(.x86, .@"64bit") and !Target.x86.featureSetHas(m.features, .@"64bit")) break :b;
+            if (cpu.has(.x86, .@"64bit") and !m.toCpu(arch).has(.x86, .@"64bit")) break :b;
 
             cpu.model = m;
         }
@@ -646,7 +646,7 @@ fn detectNativeFeatures(cpu: *Target.Cpu) void {
     }
 }
 
-const CpuidLeaf = packed struct {
+const CpuidLeaf = bitpack struct {
     eax: u32,
     ebx: u32,
     ecx: u32,

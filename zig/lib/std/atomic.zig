@@ -160,6 +160,8 @@ test Value {
 }
 
 test "Value.swap" {
+    if (builtin.zig_backend == .stage2_wasm) return error.SkipZigTest;
+
     var x = Value(usize).init(5);
     try testing.expectEqual(@as(usize, 5), x.swap(10, .seq_cst));
     try testing.expectEqual(@as(usize, 10), x.load(.seq_cst));
@@ -358,6 +360,7 @@ pub inline fn spinLoopHint() void {
         // pipelining/power resources
         // https://software.intel.com/content/www/us/en/develop/articles/benefitting-power-and-performance-sleep-loops.html
         .x86,
+        .x86c16,
         .x86_64,
         => asm volatile ("pause"),
 
@@ -380,13 +383,13 @@ pub inline fn spinLoopHint() void {
         // https://www.keil.com/support/man/docs/armasm/armasm_dom1361289926796.htm
         .arm,
         .armeb,
-        => if (comptime builtin.cpu.has(.arm, .has_v6k)) {
+        => if (comptime builtin.cpu.has(.arm, .v6k)) {
             asm volatile ("yield");
         },
 
         .thumb,
         .thumbeb,
-        => if (comptime builtin.cpu.hasAny(.arm, &.{ .has_v6m, .thumb2 })) {
+        => if (comptime builtin.cpu.hasAny(.arm, &.{ .v6m, .thumb2 })) {
             asm volatile ("yield");
         },
 
@@ -397,8 +400,22 @@ pub inline fn spinLoopHint() void {
 
         .mips,
         .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
         .mips64,
         .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
         => if (comptime builtin.cpu.has(.mips, .mips32r2)) {
             asm volatile ("pause");
         },
@@ -413,7 +430,7 @@ pub inline fn spinLoopHint() void {
 
         .sparc,
         .sparc64,
-        => if (comptime builtin.cpu.hasAny(.sparc, &.{ .v8plus, .v9 })) {
+        => if (comptime builtin.cpu.has(.sparc, .v9)) {
             asm volatile ("rd %%ccr, %%g0");
         },
 
@@ -469,8 +486,22 @@ pub fn cacheLineForCpu(cpu: std.Target.Cpu) u16 {
         .microblazeel,
         .mips,
         .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
         .mips64,
         .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
         .sh,
         .sheb,
         .sparc,

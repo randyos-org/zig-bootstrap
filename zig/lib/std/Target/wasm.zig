@@ -74,7 +74,9 @@ pub const all_features = blk: {
     result[@backingInt(Feature.fp16)] = .{
         .llvm_name = "fp16",
         .description = "Enable FP16 instructions",
-        .dependencies = featureSet(&[_]Feature{}),
+        .dependencies = featureSet(&[_]Feature{
+            .simd128,
+        }),
     };
     result[@backingInt(Feature.gc)] = .{
         .llvm_name = "gc",
@@ -121,7 +123,9 @@ pub const all_features = blk: {
     result[@backingInt(Feature.relaxed_atomics)] = .{
         .llvm_name = "relaxed-atomics",
         .description = "Enable relaxed-atomics proposal",
-        .dependencies = featureSet(&[_]Feature{}),
+        .dependencies = featureSet(&[_]Feature{
+            .atomics,
+        }),
     };
     result[@backingInt(Feature.relaxed_simd)] = .{
         .llvm_name = "relaxed-simd",
@@ -177,15 +181,15 @@ pub const cpu = struct {
         .llvm_name = "mvp",
         .features = featureSet(&[_]Feature{}),
     };
-    pub const wasm_v1_0: CpuModel = .{
-        .name = "wasm_v1_0",
+    pub const v1_0: CpuModel = .{
+        .name = "v1_0",
         .llvm_name = null,
         .features = featureSet(&[_]Feature{
             .mutable_globals,
         }),
     };
-    pub const wasm_v2_0: CpuModel = .{
-        .name = "wasm_v2_0",
+    pub const v2_0: CpuModel = .{
+        .name = "v2_0",
         .llvm_name = null,
         .features = featureSet(&[_]Feature{
             .multivalue,
@@ -196,14 +200,12 @@ pub const cpu = struct {
             .simd128,
         }),
     };
-    pub const wasm_v3_0: CpuModel = .{
-        .name = "wasm_v3_0",
+    pub const v3_0: CpuModel = .{
+        .name = "v3_0",
         .llvm_name = null,
         .features = featureSet(&[_]Feature{
-            .atomics,
             .exception_handling,
             .extended_const,
-            .fp16,
             .gc,
             .multimemory,
             .mutable_globals,

@@ -73,7 +73,7 @@ pub fn detect(
     // On windows, instead of the native (mingw) abi, we want to check
     // for the MSVC abi as a fallback.
     const use_system_abi = if (builtin.os.tag == .windows)
-        target.abi == .msvc or target.abi == .itanium
+        target.abi == .msvc
     else
         is_native_abi;
 
@@ -96,7 +96,7 @@ pub fn detect(
 }
 
 fn detectFromInstallation(arena: Allocator, target: *const std.Target, lci: *const LibCInstallation) !LibCDirs {
-    var list = try std.array_list.Managed([]const u8).initCapacity(arena, 5);
+    var list: std.ArrayList([]const u8) = try .initCapacity(arena, 5);
 
     list.appendAssumeCapacity(lci.include_dir.?);
 
@@ -133,7 +133,7 @@ fn detectFromInstallation(arena: Allocator, target: *const std.Target, lci: *con
         };
         for (subdirs) |subdir| {
             const path = try std.fs.path.join(arena, &[_][]const u8{ include_dir_path, subdir });
-            try list.append(path);
+            try list.append(arena, path);
         }
     }
 
@@ -182,8 +182,12 @@ pub fn detectFromBuilding(arena: Allocator, zig_lib_dir: Path, target: *const st
         std.zig.target.muslAbiNameHeaders(target.abi)
     else if (target.isGnuLibC())
         std.zig.target.glibcAbiNameHeaders(target.abi)
+    else if (target.isFreeBSDLibC())
+        std.zig.target.freebsdAbiNameHeaders(target.abi)
     else if (target.isNetBSDLibC())
         std.zig.target.netbsdAbiNameHeaders(target.abi)
+    else if (target.isOpenBSDLibC())
+        std.zig.target.openbsdAbiNameHeaders(target.abi)
     else
         @tagName(target.abi);
     const arch_include_dir = try arena.print("{f}" ++ s ++ "libc" ++ s ++ "include" ++ s ++ "{s}-{s}-{s}", .{
@@ -223,39 +227,7 @@ fn libCGenericName(target: *const std.Target) [:0]const u8 {
         .openbsd => return "openbsd",
         else => {},
     }
-    switch (target.abi) {
-        .gnu,
-        .gnuabin32,
-        .gnuabi64,
-        .gnueabi,
-        .gnueabihf,
-        .gnuf32,
-        .gnusf,
-        .gnux32,
-        => return "glibc",
-        .musl,
-        .muslabin32,
-        .muslabi64,
-        .musleabi,
-        .musleabihf,
-        .muslf32,
-        .muslsf,
-        .muslx32,
-        .none,
-        .ohos,
-        .ohoseabi,
-        => return "musl",
-        .eabi,
-        .eabihf,
-        .abin32,
-        .x32,
-        .ilp32,
-        .android,
-        .androideabi,
-        .msvc,
-        .itanium,
-        .simulator,
-        .call0,
-        => unreachable,
-    }
+    if (target.abi.isGnu()) return "glibc";
+    if (target.abi.isMusl()) return "musl";
+    return "zig";
 }

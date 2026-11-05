@@ -44,8 +44,9 @@ comptime {
 
 /// Represents an ELF TLS variant.
 ///
-/// In all variants, the TP and the TLS blocks must be aligned to the `p_align` value in the
-/// `PT.TLS` ELF program header. Everything else has natural alignment.
+/// In all variants, TLS blocks must be aligned to the `p_align` value in the `PT.TLS` ELF program
+/// header. The TP is usually similarly aligned, with one particular exception for the modified
+/// Variant I noted below. Everything else has natural alignment.
 ///
 /// The location of the DTV does not actually matter. For simplicity, we put it in the TLS area, but
 /// there is no actual ABI requirement that it reside there.
@@ -71,7 +72,8 @@ const Variant = enum {
     ///                               `-- The TP register points here (*inside* the TLS blocks).
     ///
     /// The offset from the start of the TLS blocks to the TP register is `current_tp_offset`. It
-    /// may be zero, in which case the TP register points to the start of the TLS blocks.
+    /// may be zero, in which case the TP register points to the end of the ABI TCB, which is
+    /// usually the start of the TLS blocks, but see `blocksGap`.
     ///
     /// The first (and only) word in the ABI TCB points to the DTV.
     I_modified,
@@ -110,8 +112,22 @@ const current_variant: Variant = switch (native_arch) {
     .m68k,
     .mips,
     .mipsel,
+    .mipsf32,
+    .mipsf32el,
+    .mipsf64,
+    .mipsf64el,
+    .mipsf64n8,
+    .mipsf64n8el,
+    .mipsn8,
+    .mipsn8el,
+    .mipsr6,
+    .mipsr6el,
     .mips64,
     .mips64el,
+    .mips64n8,
+    .mips64n8el,
+    .mips64r6,
+    .mips64r6el,
     .or1k,
     .powerpc,
     .powerpcle,
@@ -135,8 +151,22 @@ const current_tp_offset = switch (native_arch) {
     .m68k,
     .mips,
     .mipsel,
+    .mipsf32,
+    .mipsf32el,
+    .mipsf64,
+    .mipsf64el,
+    .mipsf64n8,
+    .mipsf64n8el,
+    .mipsn8,
+    .mipsn8el,
+    .mipsr6,
+    .mipsr6el,
     .mips64,
     .mips64el,
+    .mips64n8,
+    .mips64n8el,
+    .mips64r6,
+    .mips64r6el,
     .powerpc,
     .powerpcle,
     .powerpc64,
@@ -145,13 +175,41 @@ const current_tp_offset = switch (native_arch) {
     else => 0,
 };
 
+/// Only used by the modified Variant I. Calculates the number of padding bytes between the end of
+/// the ABI TCB and the start of the TLS blocks.
+///
+/// Inline because TLS is not set up yet.
+inline fn blocksGap(alignment: usize) usize {
+    return switch (native_arch) {
+        // https://git.musl-libc.org/cgit/musl/commit/?id=de5536d827114ebc6b6db7800216610385663ad2
+        //
+        // This is arguably a binutils bug, but I guess we all just have to live with it now.
+        .or1k => alignForward(16, alignment) - 16,
+        else => 0,
+    };
+}
+
 /// Usually only used by the modified Variant I.
 const current_dtv_offset = switch (native_arch) {
     .m68k,
     .mips,
     .mipsel,
+    .mipsf32,
+    .mipsf32el,
+    .mipsf64,
+    .mipsf64el,
+    .mipsf64n8,
+    .mipsf64n8el,
+    .mipsn8,
+    .mipsn8el,
+    .mipsr6,
+    .mipsr6el,
     .mips64,
     .mips64el,
+    .mips64n8,
+    .mips64n8el,
+    .mips64r6,
+    .mips64r6el,
     .powerpc,
     .powerpcle,
     .powerpc64,
@@ -197,8 +255,6 @@ const Dtv = extern struct {
 var __zig_elf_static_tls: extern struct {
     size: usize,
     alignment: usize,
-    /// Only used on the 32-bit x86 architecture (not x86_64, nor x32).
-    gdt_entry_number: usize,
 } = undefined;
 
 var area_info: struct {
@@ -229,8 +285,11 @@ fn setThreadPointer(addr: usize) void {
 
     switch (native_arch) {
         .x86 => {
+            const gdt_sel = asm volatile ("movw %%gs, %[sel]"
+                : [sel] "=r" (-> u16),
+            );
             var user_desc: linux.user_desc = .{
-                .entry_number = __zig_elf_static_tls.gdt_entry_number,
+                .entry_number = if (gdt_sel == 0) @bitCast(@as(i32, -1)) else gdt_sel >> 3,
                 .base_addr = addr,
                 .limit = 0xfffff,
                 .flags = .{
@@ -242,16 +301,12 @@ fn setThreadPointer(addr: usize) void {
                     .useable = 1,
                 },
             };
-            const rc = @call(.always_inline, linux.syscall1, .{ .set_thread_area, @intFromPtr(&user_desc) });
-            assert(rc == 0);
+            assert(@call(.always_inline, linux.syscall1, .{ .set_thread_area, @intFromPtr(&user_desc) }) == 0);
 
-            const gdt_entry_number = user_desc.entry_number;
-            // We have to keep track of our slot as it's also needed for clone()
-            __zig_elf_static_tls.gdt_entry_number = gdt_entry_number;
             // Update the %gs selector
             asm volatile ("movl %[gs_val], %%gs"
                 :
-                : [gs_val] "r" (gdt_entry_number << 3 | 3),
+                : [gs_val] "r" ((user_desc.entry_number << 3) | 3),
             );
         },
         .x86_64 => {
@@ -286,10 +341,6 @@ fn setThreadPointer(addr: usize) void {
             const rc = @call(.always_inline, linux.syscall1, .{ .set_tls, addr });
             assert(rc == 0);
         },
-        .m68k => {
-            const rc = @call(.always_inline, linux.syscall1, .{ .set_thread_area, addr });
-            assert(rc == 0);
-        },
         .hexagon => {
             asm volatile (
                 \\ ugp = %[addr]
@@ -319,7 +370,27 @@ fn setThreadPointer(addr: usize) void {
                 : [addr] "r" (addr),
             );
         },
-        .csky, .mips, .mipsel, .mips64, .mips64el => {
+        .csky,
+        .m68k,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => {
             const rc = @call(.always_inline, linux.syscall1, .{ .set_thread_area, addr });
             assert(rc == 0);
         },
@@ -403,10 +474,7 @@ fn getThreadPointer() usize {
             \\ mov %[ret], r25
             : [ret] "=r" (-> usize),
         ),
-        .arm, .armeb, .thumb, .thumbeb => asm (
-            \\ mrc p15, 0, %[ret], c13, c0, 3
-            : [ret] "=r" (-> usize),
-        ),
+        .arm, .armeb, .thumb, .thumbeb => @as(*const fn () callconv(.c) usize, @ptrCast(&@import("../arm.zig").__aeabi_read_tp))(),
         .csky => asm (
             \\ mov %[ret], r31
             : [ret] "=r" (-> usize),
@@ -423,8 +491,26 @@ fn getThreadPointer() usize {
             \\ move %[ret], $tp
             : [ret] "=r" (-> usize),
         ),
-        .m68k => linux.syscall0(.get_thread_area),
-        .mips, .mipsel, .mips64, .mips64el => asm (
+        .m68k => @call(.always_inline, linux.syscall0, .{.get_thread_area}),
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => asm (
             \\ rdhwr %[ret], $29
             : [ret] "=r" (-> usize),
         ),
@@ -548,16 +634,18 @@ fn computeAreaDesc(phdrs: []elf.ElfN.Phdr) void {
             var l: usize = 0;
             dtv_offset = l;
             l += @sizeOf(Dtv);
-            // In this variant, the TLS blocks must begin immediately after the end of the ABI TCB,
-            // with the TP pointing to the beginning of the TLS blocks. Add padding so that the TP
-            // (`abi_tcb_offset`) is aligned to `align_factor` and the `ZigTcb` structure can be
-            // found by subtracting `@sizeOf(AbiTcb) + @sizeOf(ZigTcb)` from the TP.
-            const delta = (l + @sizeOf(ZigTcb) + @sizeOf(AbiTcb)) & (align_factor - 1);
+            // In this variant, the TLS blocks begin `blocksGap()` bytes (usually zero) after the
+            // end of the ABI TCB. Add padding so that the TLS blocks are aligned to `align_factor`
+            // and the `ZigTcb` structure can be found by subtracting
+            // `@sizeOf(AbiTcb) + @sizeOf(ZigTcb)` from the end of the ABI TCB.
+            const gap = blocksGap(align_factor);
+            const delta = (l + @sizeOf(ZigTcb) + @sizeOf(AbiTcb) + gap) & (align_factor - 1);
             if (delta > 0)
                 l += align_factor - delta;
             l += @sizeOf(ZigTcb);
             abi_tcb_offset = l;
             l += @sizeOf(AbiTcb);
+            l += gap;
             block_offset = l;
             l += block_size;
             break :blk l;
@@ -583,7 +671,6 @@ fn computeAreaDesc(phdrs: []elf.ElfN.Phdr) void {
     __zig_elf_static_tls = .{
         .size = area_size,
         .alignment = align_factor,
-        .gdt_entry_number = @as(usize, @bitCast(@as(isize, -1))),
     };
 
     area_info = .{
@@ -648,7 +735,8 @@ fn __zig_elf_static_tls_fill(area: [*]u8) callconv(.c) usize {
     // the pointer arithmetic involving the TP is done with wrapping semantics.
     return @intFromPtr(area) +% switch (current_variant) {
         .I_original, .II => area_info.abi_tcb.offset,
-        .I_modified => area_info.block.offset +% current_tp_offset,
+        // This expression must account for the `blocksGap() != 0` possibility.
+        .I_modified => area_info.abi_tcb.offset +% @sizeOf(AbiTcb) +% current_tp_offset,
     };
 }
 
@@ -745,6 +833,9 @@ fn __tls_get_addr(ti: *const TlsIndex) callconv(.c) *anyopaque {
     const tp = getThreadPointer();
     const block = switch (current_variant) {
         .I_original => tp -% area_info.abi_tcb.offset +% area_info.block.offset,
+        // For `blocksGap() != 0`, this intentionally computes the end of the ABI TCB rather than
+        // the beginning of the TLS blocks. The linker will include the `blocksGap()` in the offset
+        // written into `ti.offset`.
         .I_modified => tp -% current_tp_offset,
         // The `.I_original` approach would also work for `.II`, but there is an
         // alternative strategy which is one less operation:
@@ -753,7 +844,7 @@ fn __tls_get_addr(ti: *const TlsIndex) callconv(.c) *anyopaque {
     return @ptrFromInt(block +% current_dtv_offset +% @as(usize, @intCast(ti.offset)));
 }
 
-fn ___tls_get_addr() callconv(.naked) *anyopaque {
+fn ___tls_get_addr() callconv(.naked) noreturn {
     comptime assert(native_arch == .x86);
 
     // We receive the `TlsIndex` pointer in eax.

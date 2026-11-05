@@ -16,11 +16,11 @@ pub fn deinit(si: *SelfInfo, io: Io) void {
     const gpa = std.debug.getDebugInfoAllocator();
     for (si.modules.items) |*mod| {
         unwind: {
-            const u = &(mod.unwind orelse break :unwind catch break :unwind);
+            const u = &((mod.unwind orelse break :unwind) catch break :unwind);
             for (u.buf[0..u.len]) |*unwind| unwind.deinit(gpa);
         }
         loaded: {
-            const l = &(mod.loaded_elf orelse break :loaded catch break :loaded);
+            const l = &((mod.loaded_elf orelse break :loaded) catch break :loaded);
             l.file.deinit(gpa);
         }
     }
@@ -120,11 +120,9 @@ pub const can_unwind: bool = s: {
             .aarch64,
             .arm,
             .riscv64,
-            .x86,
             .x86_64,
         },
         .illumos => &.{
-            .x86,
             .x86_64,
         },
         // Not supported yet: hppa, hppa64, microblaze/microblazeel, sh/sheb
@@ -141,8 +139,22 @@ pub const can_unwind: bool = s: {
             .m68k,
             .mips,
             .mipsel,
+            .mipsf32,
+            .mipsf32el,
+            .mipsf64,
+            .mipsf64el,
+            .mipsf64n8,
+            .mipsf64n8el,
+            .mipsn8,
+            .mipsn8el,
+            .mipsr6,
+            .mipsr6el,
             .mips64,
             .mips64el,
+            .mips64n8,
+            .mips64n8el,
+            .mips64r6,
+            .mips64r6el,
             .or1k,
             .riscv32,
             .riscv64,
@@ -165,7 +177,6 @@ pub const can_unwind: bool = s: {
             .aarch64,
             .arm,
             .riscv64,
-            .x86,
             .x86_64,
         },
         // Not supported yet: hppa, mips64/mips64el, sh/sheb
@@ -178,6 +189,10 @@ pub const can_unwind: bool = s: {
             .m68k,
             .mips,
             .mipsel,
+            .mipsf32,
+            .mipsf32el,
+            .mips64,
+            .mips64el,
             .riscv32,
             .riscv64,
             .x86,
@@ -189,7 +204,6 @@ pub const can_unwind: bool = s: {
             .arm,
             .m88k,
             .mips64,
-            .mips64el,
             .riscv64,
             .x86,
             .x86_64,
@@ -202,11 +216,6 @@ pub const can_unwind: bool = s: {
     }
     break :s false;
 };
-comptime {
-    if (can_unwind) {
-        std.debug.assert(Dwarf.supportsUnwinding(&builtin.target));
-    }
-}
 pub const UnwindContext = Dwarf.SelfUnwinder;
 pub fn unwindFrame(si: *SelfInfo, io: Io, context: *UnwindContext) Error!usize {
     comptime assert(can_unwind);
@@ -432,11 +441,11 @@ fn findModule(si: *SelfInfo, gpa: Allocator, io: Io, address: usize, lock: enum 
         }
         for (si.modules.items) |*mod| {
             unwind: {
-                const u = &(mod.unwind orelse break :unwind catch break :unwind);
+                const u = &((mod.unwind orelse break :unwind) catch break :unwind);
                 for (u.buf[0..u.len]) |*unwind| unwind.deinit(gpa);
             }
             loaded: {
-                const l = &(mod.loaded_elf orelse break :loaded catch break :loaded);
+                const l = &((mod.loaded_elf orelse break :loaded) catch break :loaded);
                 l.file.deinit(gpa);
             }
         }

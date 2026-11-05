@@ -571,8 +571,8 @@ fn scanAllCompileUnits(di: *Dwarf, gpa: Allocator, endian: Endian) ScanError!voi
     var fr: Reader = .fixed(di.section(.debug_info).?);
     var this_unit_offset: u64 = 0;
 
-    var attrs_buf = std.array_list.Managed(Die.Attr).init(gpa);
-    defer attrs_buf.deinit();
+    var attrs_buf: std.ArrayList(Die.Attr) = .empty;
+    defer attrs_buf.deinit(gpa);
 
     while (this_unit_offset < fr.buffer.len) {
         fr.seek = @intCast(this_unit_offset);
@@ -603,7 +603,7 @@ fn scanAllCompileUnits(di: *Dwarf, gpa: Allocator, endian: Endian) ScanError!voi
         for (abbrev_table.abbrevs) |abbrev| {
             max_attrs = @max(max_attrs, abbrev.attrs.len);
         }
-        try attrs_buf.resize(max_attrs);
+        try attrs_buf.resize(gpa, max_attrs);
 
         var compile_unit_die = (try parseDie(
             &fr,
@@ -1153,7 +1153,7 @@ fn runLineNumberProgram(d: *Dwarf, gpa: Allocator, endian: Endian, compile_unit:
                         .size = size,
                     });
                 },
-                DW.LNE.ZIG_set_decl => {
+                DW.LNE.ZIG_set_decl, DW.LNE.ZIG_set_source_decl => {
                     const decl_die_offset = try readFormatSizedInt(&fr, unit_header.format, endian);
                     var di_fr: Reader = .fixed(d.section(.debug_info) orelse continue);
                     di_fr.seek = @intCast(decl_die_offset);
@@ -1166,15 +1166,46 @@ fn runLineNumberProgram(d: *Dwarf, gpa: Allocator, endian: Endian, compile_unit:
                         addr_size_bytes,
                         compile_unit.version,
                     )) orelse continue;
-                    if (die.getAttr(AT.low_pc)) |_| {
-                        prog.address = try die.getAttrAddr(d, endian, AT.low_pc, compile_unit);
+                    if (sub_op == DW.LNE.ZIG_set_decl) {
+                        if (die.getAttr(AT.low_pc)) |_| {
+                            prog.address = try die.getAttrAddr(d, endian, AT.low_pc, compile_unit);
+                        }
                     }
+                    while (die.getAttr(AT.decl_line) == null) {
+                        if (die.getAttr(AT.abstract_origin)) |_| {
+                            di_fr.seek = @intCast(try die.getAttrRef(
+                                AT.abstract_origin,
+                                compile_unit.offset,
+                                compile_unit.size,
+                            ));
+                        } else if (die.getAttr(AT.specification)) |_| {
+                            di_fr.seek = @intCast(try die.getAttrRef(
+                                AT.specification,
+                                compile_unit.offset,
+                                compile_unit.size,
+                            ));
+                        } else {
+                            // no specification, so we can't find DW_AT_decl_line
+                            break;
+                        }
+                        die = (try parseDie(
+                            &di_fr,
+                            attrs_buf,
+                            abbrev_table,
+                            unit_header.format,
+                            endian,
+                            addr_size_bytes,
+                            compile_unit.version,
+                        )) orelse break;
+                    }
+
                     if (die.getAttr(AT.decl_line)) |decl_line| {
                         prog.line = try decl_line.getUInt(i64);
                     }
                     if (die.getAttr(AT.decl_column)) |decl_column| {
                         prog.column = try decl_column.getUInt(u64);
                     }
+
                     while (die.getAttr(AT.decl_file) == null) {
                         if (die.getAttr(AT.abstract_origin)) |_| {
                             di_fr.seek = @intCast(try die.getAttrRef(
@@ -1526,14 +1557,32 @@ pub fn ipRegNum(arch: std.Target.Cpu.Arch) ?u16 {
         .loongarch32, .loongarch64 => 64,
         .m68k => 26,
         .m88k => 64,
-        .mips, .mipsel, .mips64, .mips64el => 66,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => 66,
         .or1k => 35,
         .powerpc, .powerpcle, .powerpc64, .powerpc64le => 67,
         .riscv32, .riscv32be, .riscv64, .riscv64be => 65,
         .s390x => 65,
         .sparc, .sparc64 => 65,
         .ve => 144,
-        .x86 => 8,
+        .x86, .x86c16 => 8,
         .x86_64 => 16,
         else => null,
     };
@@ -1544,7 +1593,8 @@ pub fn fpRegNum(arch: std.Target.Cpu.Arch) u16 {
         .aarch64, .aarch64_be => 29,
         .alpha => 15,
         .arc, .arceb => 27,
-        .arm, .armeb, .thumb, .thumbeb => 11,
+        .arm, .armeb => 11,
+        .thumb, .thumbeb => 7,
         .csky => 14,
         .hexagon => 30,
         .kvx => 14,
@@ -1552,14 +1602,32 @@ pub fn fpRegNum(arch: std.Target.Cpu.Arch) u16 {
         .loongarch32, .loongarch64 => 22,
         .m68k => 14,
         .m88k => 30,
-        .mips, .mipsel, .mips64, .mips64el => 30,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => 30,
         .or1k => 2,
         .powerpc, .powerpcle, .powerpc64, .powerpc64le => 1,
         .riscv32, .riscv32be, .riscv64, .riscv64be => 8,
         .s390x => 11,
         .sparc, .sparc64 => 30,
         .ve => 9,
-        .x86 => 5,
+        .x86, .x86c16 => 5,
         .x86_64 => 6,
         else => unreachable,
     };
@@ -1578,34 +1646,34 @@ pub fn spRegNum(arch: std.Target.Cpu.Arch) u16 {
         .loongarch32, .loongarch64 => 3,
         .m68k => 15,
         .m88k => 31,
-        .mips, .mipsel, .mips64, .mips64el => 29,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => 29,
         .or1k => 1,
         .powerpc, .powerpcle, .powerpc64, .powerpc64le => 1,
         .riscv32, .riscv32be, .riscv64, .riscv64be => 2,
         .s390x => 15,
         .sparc, .sparc64 => 14,
         .ve => 11,
-        .x86 => 4,
+        .x86, .x86c16 => 4,
         .x86_64 => 7,
         else => unreachable,
-    };
-}
-
-/// Tells whether unwinding for this target is supported by the Dwarf standard.
-///
-/// See also `std.debug.SelfInfo.can_unwind` which tells whether the Zig standard
-/// library has a working implementation of unwinding for the current target.
-pub fn supportsUnwinding(target: *const std.Target) bool {
-    return switch (target.cpu.arch) {
-        .nvptx,
-        .nvptx64,
-        .spirv32,
-        .spirv64,
-        => false,
-
-        // Conservative guess. Feel free to update this logic with any targets
-        // that are known to not support Dwarf unwinding.
-        else => true,
     };
 }
 

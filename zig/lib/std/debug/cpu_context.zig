@@ -12,10 +12,28 @@ else switch (native_arch) {
     .hexagon => Hexagon,
     .kvx => Kvx,
     .lanai => Lanai,
-    .loongarch32, .loongarch64 => LoongArch,
+    .loongarch32, .loongarch64 => Loongarch,
     .m68k => M68k,
     .m88k => M88k,
-    .mips, .mipsel, .mips64, .mips64el => Mips,
+    .mips,
+    .mipsel,
+    .mipsf32,
+    .mipsf32el,
+    .mipsf64,
+    .mipsf64el,
+    .mipsf64n8,
+    .mipsf64n8el,
+    .mipsn8,
+    .mipsn8el,
+    .mipsr6,
+    .mipsr6el,
+    .mips64,
+    .mips64el,
+    .mips64n8,
+    .mips64n8el,
+    .mips64r6,
+    .mips64r6el,
+    => Mips,
     .or1k => Or1k,
     .powerpc, .powerpcle, .powerpc64, .powerpc64le => Powerpc,
     .sparc, .sparc64 => Sparc,
@@ -23,7 +41,7 @@ else switch (native_arch) {
     .ve => Ve,
     .s390x => S390x,
     .x86_16 => X86_16,
-    .x86 => X86,
+    .x86, .x86c16 => X86,
     .x86_64 => X86_64,
     else => noreturn,
 };
@@ -57,7 +75,7 @@ pub fn fromPosixSignalContext(ctx_ptr: ?*const anyopaque) ?Native {
         // The 32-bit kABI (added later) kept the 64-bit layout.
         return .{
             .r = s: {
-                var regs: [32]LoongArch.Gpr = undefined;
+                var regs: [32]Loongarch.Gpr = undefined;
                 for (uc.mcontext.r, 0..) |r, i| regs[i] = @truncate(r);
                 break :s regs;
             },
@@ -70,7 +88,7 @@ pub fn fromPosixSignalContext(ctx_ptr: ?*const anyopaque) ?Native {
             .r = uc.mcontext.r,
             .xip = uc.mcontext.xip & ~@as(u32, 0b11),
         };
-    } else if (native_arch.isMIPS32() and native_os == .linux) {
+    } else if (native_arch.isMips32() and native_os == .linux) {
         // The O32 kABI uses 64-bit fields for some reason.
         return .{
             .r = s: {
@@ -80,7 +98,7 @@ pub fn fromPosixSignalContext(ctx_ptr: ?*const anyopaque) ?Native {
             },
             .pc = @truncate(uc.mcontext.pc),
         };
-    } else if (native_arch.isSPARC() and native_os == .linux) {
+    } else if (native_arch.isSparc() and native_os == .linux) {
         const SparcStackFrame = extern struct {
             l: [8]usize,
             i: [8]usize,
@@ -137,7 +155,29 @@ pub fn fromPosixSignalContext(ctx_ptr: ?*const anyopaque) ?Native {
                 [_]Csky.Gpr{uc.mcontext.r31},
             .pc = uc.mcontext.pc,
         },
-        .hexagon, .loongarch32, .loongarch64, .mips, .mipsel, .mips64, .mips64el, .or1k => .{
+        .hexagon,
+        .loongarch32,
+        .loongarch64,
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        .or1k,
+        => .{
             .r = uc.mcontext.r,
             .pc = uc.mcontext.pc,
         },
@@ -170,7 +210,7 @@ pub fn fromPosixSignalContext(ctx_ptr: ?*const anyopaque) ?Native {
                 .addr = uc.mcontext.psw.addr,
             },
         },
-        .x86 => .{ .gprs = .init(.{
+        .x86, .x86c16 => .{ .gprs = .init(.{
             .eax = uc.mcontext.eax,
             .ecx = uc.mcontext.ecx,
             .edx = uc.mcontext.edx,
@@ -473,21 +513,49 @@ const Arm = struct {
 
     pub inline fn current() Arm {
         var ctx: Arm = undefined;
+        // thumb1 only supports STM with writeback enabled, and in that case r0 shouldn't be
+        // included in the register list, as that creates an ambiguity between whether r0 is
+        // modified before or after r0 is written to memory.  So to avoid this we store it
+        // separately.
+        //
+        // Additionally R8-R15 cannot be stored directly by STM nor STR on thumb1, so we copy
+        // them to R1-R2 and STM those.  We could save a couple extra bytes/cycles by doing two
+        // groups of 4xMOV+STM instead of four groups of 2xMOV+STM, but that would require
+        // clobbering five registers instead of three, and that probably negates the advantage.
+        //
+        // r0 is both an input register and a clobber. musl and glibc achieve this with
+        // a "+" constraint, which isn't supported in Zig, so instead we separately list
+        // r0 as both an input and an output. Listing it as an input and a clobber would
+        // cause the C backend to emit invalid code that results in:
+        // "error: asm-specifier for input or output variable conflicts with asm clobber list"
+        var r0_out: usize = undefined;
         asm volatile (
-            \\ // For compatibility with Thumb, we can't write r13 (sp) or r15 (pc) with stm.
-            \\ stm r0, {r0-r12}
-            \\ str r13, [r0, #0x34]
-            \\ str r14, [r0, #0x38]
-            \\ mov r1, pc
-            \\ str r1, [r0, #0x3c]
-            :
-            : [r] "{r0}" (&ctx.r),
-            : .{ .r1 = true, .memory = true });
+            \\ str r0, [r0, #-4]
+            \\ stm r0!, {r1-r7}
+            \\ // r0 is now &ctx.r[8]
+            \\ mov r1, r8
+            \\ mov r2, r9
+            \\ stm r0!, {r1-r2}
+            \\ // r0 is now &ctx.r[10]
+            \\ mov r1, r10
+            \\ mov r2, r11
+            \\ stm r0!, {r1-r2}
+            \\ // r0 is now &ctx.r[12]
+            \\ mov r1, r12
+            \\ mov r2, r13
+            \\ stm r0!, {r1-r2}
+            \\ // r0 is now &ctx.r[14]
+            \\ mov r1, r14
+            \\ mov r2, r15
+            \\ stm r0!, {r1-r2}
+            : [r0_out] "={r0}" (r0_out),
+            : [r] "{r0}" (&ctx.r[1]),
+            : .{ .r1 = true, .r2 = true, .memory = true });
         return ctx;
     }
 
     pub fn getFp(ctx: *const Arm) usize {
-        return ctx.r[11];
+        return ctx.r[if (native_arch.isThumb()) 7 else 11];
     }
     pub fn getPc(ctx: *const Arm) usize {
         return ctx.r[15];
@@ -787,15 +855,15 @@ const Lanai = extern struct {
 };
 
 /// This is an `extern struct` so that inline assembly in `current` can use field offsets.
-const LoongArch = extern struct {
+const Loongarch = extern struct {
     /// The numbered general-purpose registers r0 - r31. r0 must be zero.
     r: [32]Gpr,
     pc: Gpr,
 
     pub const Gpr = if (native_arch == .loongarch64) u64 else u32;
 
-    pub inline fn current() LoongArch {
-        var ctx: LoongArch = undefined;
+    pub inline fn current() Loongarch {
+        var ctx: Loongarch = undefined;
         asm volatile (if (Gpr == u64)
                 \\ st.d $zero, $t0, 0
                 \\ st.d $ra, $t0, 8
@@ -874,14 +942,14 @@ const LoongArch = extern struct {
         return ctx;
     }
 
-    pub fn getFp(ctx: *const LoongArch) usize {
+    pub fn getFp(ctx: *const Loongarch) usize {
         return ctx.r[22];
     }
-    pub fn getPc(ctx: *const LoongArch) usize {
+    pub fn getPc(ctx: *const Loongarch) usize {
         return ctx.pc;
     }
 
-    pub fn dwarfRegisterBytes(ctx: *LoongArch, register_num: u16) DwarfRegisterError![]u8 {
+    pub fn dwarfRegisterBytes(ctx: *Loongarch, register_num: u16) DwarfRegisterError![]u8 {
         switch (register_num) {
             0...31 => return @ptrCast(&ctx.r[register_num]),
             64 => return @ptrCast(&ctx.pc),
@@ -1013,7 +1081,7 @@ const Mips = extern struct {
     r: [32]Gpr,
     pc: Gpr,
 
-    pub const Gpr = if (native_arch.isMIPS64()) u64 else u32;
+    pub const Gpr = if (native_arch.isMips64()) u64 else u32;
 
     pub inline fn current() Mips {
         var ctx: Mips = undefined;
@@ -1215,7 +1283,7 @@ const Powerpc = extern struct {
     pc: Gpr,
     lr: Gpr,
 
-    pub const Gpr = if (native_arch.isPowerPC64()) u64 else u32;
+    pub const Gpr = if (native_arch.isPowerpc64()) u64 else u32;
 
     pub inline fn current() Powerpc {
         var ctx: Powerpc = undefined;
@@ -2040,8 +2108,22 @@ const signal_ucontext_t = switch (native_os) {
         .m68k,
         .mips,
         .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
         .mips64,
         .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
         .or1k,
         .s390x,
         .sh,
@@ -2137,7 +2219,19 @@ const signal_ucontext_t = switch (native_os) {
                     pc: u32,
                 },
                 // https://github.com/torvalds/linux/blob/cd5a0afbdf8033dc83786315d63f8b325bdba2fd/arch/mips/include/uapi/asm/sigcontext.h
-                .mips, .mipsel => extern struct {
+                .mips,
+                .mipsel,
+                .mipsf32,
+                .mipsf32el,
+                .mipsf64,
+                .mipsf64el,
+                .mipsf64n8,
+                .mipsf64n8el,
+                .mipsn8,
+                .mipsn8el,
+                .mipsr6,
+                .mipsr6el,
+                => extern struct {
                     _regmask: u32,
                     _status: u32,
                     // ??? A spectacularly failed attempt to be future-proof?
@@ -2145,7 +2239,13 @@ const signal_ucontext_t = switch (native_os) {
                     r: [32]u64,
                 },
                 // https://github.com/torvalds/linux/blob/cd5a0afbdf8033dc83786315d63f8b325bdba2fd/arch/mips/include/uapi/asm/sigcontext.h
-                .mips64, .mips64el => extern struct {
+                .mips64,
+                .mips64el,
+                .mips64n8,
+                .mips64n8el,
+                .mips64r6,
+                .mips64r6el,
+                => extern struct {
                     r: [32]u64,
                     _fpregs: [32]u64,
                     _hi: [4]u64,
@@ -2318,28 +2418,6 @@ const signal_ucontext_t = switch (native_os) {
                 pc: u64,
             },
             // https://github.com/freebsd/freebsd-src/blob/55c28005f544282b984ae0e15dacd0c108d8ab12/sys/x86/include/ucontext.h
-            .x86 => extern struct {
-                _onstack: i32 align(16),
-                _gs: i32,
-                _fs: i32,
-                _es: i32,
-                _ds: i32,
-                edi: u32,
-                esi: u32,
-                ebp: u32,
-                _isp: i32,
-                ebx: u32,
-                edx: u32,
-                ecx: u32,
-                eax: u32,
-                _trapno: i32,
-                _err: i32,
-                eip: u32,
-                _cs: i32,
-                _eflags: i32,
-                esp: u32,
-            },
-            // https://github.com/freebsd/freebsd-src/blob/55c28005f544282b984ae0e15dacd0c108d8ab12/sys/x86/include/ucontext.h
             .x86_64 => extern struct {
                 _onstack: i64 align(16),
                 rdi: u64,
@@ -2426,24 +2504,6 @@ const signal_ucontext_t = switch (native_os) {
         _sigmask: std.c.sigset_t,
         _stack: std.c.stack_t,
         mcontext: switch (native_arch) {
-            // https://github.com/illumos/illumos-gate/blob/d4ce137bba3bd16823db6374d9e9a643264ce245/usr/src/uts/intel/sys/mcontext.h
-            .x86 => extern struct {
-                _gs: u32,
-                _fs: u32,
-                _es: u32,
-                _ds: u32,
-                edi: u32,
-                esi: u32,
-                ebp: u32,
-                esp: u32,
-                ebx: u32,
-                edx: u32,
-                ecx: u32,
-                eax: u32,
-                _trapno: i32,
-                _err: i32,
-                eip: u32,
-            },
             // https://github.com/illumos/illumos-gate/blob/d4ce137bba3bd16823db6374d9e9a643264ce245/usr/src/uts/intel/sys/mcontext.h
             .x86_64 => extern struct {
                 r15: u64 align(16),
@@ -2534,7 +2594,7 @@ const signal_ucontext_t = switch (native_os) {
             },
         },
         // https://github.com/openbsd/src/blob/42468faed8369d07ae49ae02dd71ec34f59b66cd/sys/arch/mips64/include/signal.h
-        .mips64, .mips64el => extern struct {
+        .mips64 => extern struct {
             _cookie: i64,
             _mask: i64,
             mcontext: extern struct {
@@ -2691,7 +2751,7 @@ const signal_ucontext_t = switch (native_os) {
                 pc: u32,
             },
             // https://github.com/NetBSD/src/blob/861008c62187bf7bc0aac4d81e52ed6eee4d0c74/sys/arch/mips/include/mcontext.h
-            .mips, .mipsel => extern struct {
+            .mips, .mipsel, .mipsf32, .mipsf32el => extern struct {
                 r: [32]u32 align(8),
                 _lo: i32,
                 _hi: i32,
@@ -2699,7 +2759,13 @@ const signal_ucontext_t = switch (native_os) {
                 pc: u32,
             },
             // https://github.com/NetBSD/src/blob/861008c62187bf7bc0aac4d81e52ed6eee4d0c74/sys/arch/mips/include/mcontext.h
-            .mips64, .mips64el => @compileError("https://github.com/ziglang/zig/issues/23765#issuecomment-2880386178"),
+            .mips64, .mips64el => extern struct {
+                r: [32]u64,
+                _lo: i64,
+                _hi: i64,
+                _cause: i64,
+                pc: u64,
+            },
             // https://github.com/NetBSD/src/blob/861008c62187bf7bc0aac4d81e52ed6eee4d0c74/sys/arch/powerpc/include/mcontext.h
             .powerpc => extern struct {
                 r: [32]u32 align(16),
@@ -2903,48 +2969,6 @@ const signal_ucontext_t = switch (native_os) {
                 s2_11: [10]u64,
                 t3_6: [4]u64,
                 pc: u64,
-            },
-            // https://github.com/haiku/haiku/blob/47538c534fe0aadc626c09d121773fee8ea10d71/headers/posix/arch/x86/signal.h
-            .x86 => extern struct {
-                eip: u32,
-                _eflags: u32,
-                eax: u32,
-                ecx: u32,
-                edx: u32,
-                esp: u32,
-                ebp: u32,
-                _reserved: u32,
-                _xregs: extern struct {
-                    _fp_control: u16,
-                    _fp_status: u16,
-                    _fp_tag: u16,
-                    _fp_opcode: u16,
-                    _fp_eip: u32,
-                    _fp_cs: u16,
-                    _reserved1: u16,
-                    _fp_datap: u32,
-                    _fp_ds: u16,
-                    _reserved2: u16,
-                    _mxcsr: u32,
-                    _mxcsr_mask: u32,
-                    _mmx: [8][16]u8,
-                    _xmmx: [8][16]u8,
-                    _reserved3: [176]u8,
-                    _fault_address: u32,
-                    _error_code: u32,
-                    _cs: u16,
-                    _ds: u16,
-                    _es: u16,
-                    _fs: u16,
-                    _gs: u16,
-                    _ss: u16,
-                    _trap_number: u8,
-                    _reserved4: [27]u8,
-                    _format: u32,
-                },
-                edi: u32,
-                esi: u32,
-                ebx: u32,
             },
             // https://github.com/haiku/haiku/blob/47538c534fe0aadc626c09d121773fee8ea10d71/headers/posix/arch/x86_64/signal.h
             .x86_64 => extern struct {

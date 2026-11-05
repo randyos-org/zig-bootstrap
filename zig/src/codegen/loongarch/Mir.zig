@@ -175,13 +175,13 @@ fn emitReloc(
     addend: i64,
 ) !void {
     if (lf.cast(.elf2)) |ef| {
-        try ef.addReloc(atom_index, offset, sym_index, addend, .{ .LARCH = reloc_type });
+        try ef.addAtomReloc(atom_index, offset, sym_index, addend, .{ .LARCH = reloc_type });
     } else if (lf.cast(.elf)) |ef| {
         const zo = ef.zigObjectPtr().?;
         const atom = zo.symbol(@backingInt(atom_index)).atom(ef).?;
         try atom.addReloc(zcu.gpa, .{
             .r_offset = offset,
-            .r_info = @as(u64, @backingInt(sym_index)) << 32 | @backingInt(reloc_type),
+            .r_info = (@as(u64, @backingInt(sym_index)) << 32) | @backingInt(reloc_type),
             .r_addend = @bitCast(addend),
         }, zo);
     } else unreachable;

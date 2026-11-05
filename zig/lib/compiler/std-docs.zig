@@ -62,7 +62,7 @@ pub fn main(init: std.process.Init) !void {
         .reuse_address = true,
     });
     const port = http_server.socket.address.getPort();
-    const url_with_newline = try std.fmt.allocPrint(arena, "http://127.0.0.1:{d}/\n", .{port});
+    const url_with_newline = try arena.print("http://127.0.0.1:{d}/\n", .{port});
     Io.File.stdout().writeStreamingAll(io, url_with_newline) catch {};
     if (should_open_browser) {
         openBrowserTab(io, url_with_newline[0 .. url_with_newline.len - 1 :'\n']) catch |err| {
@@ -203,7 +203,7 @@ fn serveSourcesTar(request: *std.http.Server.Request, context: *Context) !void {
     defer std_dir.close(io);
 
     var walker = try std_dir.walk(gpa);
-    defer walker.deinit();
+    defer walker.deinit(io);
 
     var archiver: std.tar.Writer = .{ .underlying_writer = &response.writer };
     archiver.prefix = "std";
@@ -271,10 +271,17 @@ fn serveWasm(
     // Do the compilation every request, so that the user can edit the files
     // and see the changes without restarting the server.
     const wasm_base_path = try buildWasmBinary(arena, context, optimize_mode);
-    const target = std.zig.system.resolveTargetQuery(io, std.Build.parseTargetQuery(.{
-        .arch_os_abi = autodoc_arch_os_abi,
-        .cpu_features = autodoc_cpu_features,
-    }) catch unreachable) catch unreachable;
+    var target_diags: std.zig.system.ResolveTargetDiagnostics = .none;
+    const target = std.zig.system.resolveTargetQuery(
+        io,
+        arena,
+        std.Build.parseTargetQuery(.{
+            .arch_os_abi = autodoc_arch_os_abi,
+            .cpu_features = autodoc_cpu_features,
+        }) catch unreachable,
+        &target_diags,
+    ) catch unreachable;
+    assert(target_diags.isEmpty());
     const bin_name = try std.zig.binNameAlloc(arena, .{
         .root_name = autodoc_root_name,
         .cpu_arch = target.cpu.arch,
@@ -321,13 +328,11 @@ fn buildWasmBinary(
         "--name", autodoc_root_name, //
         "-rdynamic", //
         "--dep", "Walk", //
-        try std.fmt.allocPrint(
-            arena,
+        try arena.print(
             "-Mroot={s}/docs/wasm/main.zig",
             .{context.zig_lib_directory},
         ),
-        try std.fmt.allocPrint(
-            arena,
+        try arena.print(
             "-MWalk={s}/docs/wasm/Walk.zig",
             .{context.zig_lib_directory},
         ),
@@ -421,25 +426,26 @@ fn buildWasmBinary(
     child.stdin = null;
 
     const term = try child.wait(io);
-    if (!term.success()) {
-        std.log.err("the following command {f}:\n{s}", .{
-            term, try std.zig.allocPrintCmd(arena, argv.items, .{}),
-        });
+    if (!term.eql(.success)) {
+        std.log.err(
+            "the following command {f}:\n{f}",
+            .{ term, std.zig.SubprocessCommand{ .argv = argv.items } },
+        );
         return error.WasmCompilationFailed;
     }
 
     if (result_error_bundle.errorMessageCount() > 0) {
         try result_error_bundle.renderToStderr(io, .{}, .auto);
-        std.log.err("the following command failed with {d} compilation errors:\n{s}", .{
+        std.log.err("the following command failed with {d} compilation errors:\n{f}", .{
             result_error_bundle.errorMessageCount(),
-            try std.zig.allocPrintCmd(arena, argv.items, .{}),
+            std.zig.SubprocessCommand{ .argv = argv.items },
         });
         return error.WasmCompilationFailed;
     }
 
     return result orelse {
-        std.log.err("child process failed to report result\n{s}", .{
-            try std.zig.allocPrintCmd(arena, argv.items, .{}),
+        std.log.err("child process failed to report result\n{f}", .{
+            std.zig.SubprocessCommand{ .argv = argv.items },
         });
         return error.WasmCompilationFailed;
     };

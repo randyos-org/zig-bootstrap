@@ -565,6 +565,7 @@ fn bitslicedOperation(
         const hi = lo + n * 16;
         var buf: [w * 16]u8 = undefined;
         @memcpy(buf[0 .. n * 16], src[lo..hi]);
+        @memset(buf[n * 16 ..], 0);
         if (operation == .decrypt) {
             bitsliced.Wide.decrypt(rounds, keys, &buf);
         } else {
@@ -728,7 +729,7 @@ pub const Aes256 = struct {
 // constants
 
 // Rijndael's irreducible polynomial.
-const poly: u9 = 1 << 8 | 1 << 4 | 1 << 3 | 1 << 1 | 1 << 0; // x⁸ + x⁴ + x³ + x + 1
+const poly: u9 = (1 << 8) | (1 << 4) | (1 << 3) | (1 << 1) | (1 << 0); // x⁸ + x⁴ + x³ + x + 1
 
 // Powers of x mod poly in GF(2).
 const powx = init: {

@@ -245,10 +245,10 @@ const m68k = struct {
             model: ?*const Target.Cpu.Model = null,
 
             const cpu_names = .{
-                .{ "68020", &Target.m68k.cpu.M68020 },
-                .{ "68030", &Target.m68k.cpu.M68030 },
-                .{ "68040", &Target.m68k.cpu.M68040 },
-                .{ "68060", &Target.m68k.cpu.M68060 },
+                .{ "68020", &Target.m68k.cpu.m68020 },
+                .{ "68030", &Target.m68k.cpu.m68030 },
+                .{ "68040", &Target.m68k.cpu.m68040 },
+                .{ "68060", &Target.m68k.cpu.m68060 },
             };
 
             fn lineHook(self: *Impl, key: []const u8, value: []const u8) !bool {
@@ -300,8 +300,8 @@ const mips = struct {
             model: ?*const Target.Cpu.Model = null,
 
             const cpu_names = .{
-                .{ "Cavium Octeon III", &Target.mips.cpu.@"octeon+" },
-                .{ "Cavium Octeon II", &Target.mips.cpu.@"octeon+" },
+                .{ "Cavium Octeon III", &Target.mips.cpu.octeon3 },
+                .{ "Cavium Octeon II", &Target.mips.cpu.octeon2 },
                 .{ "Cavium Octeon+", &Target.mips.cpu.@"octeon+" },
                 .{ "Cavium Octeon", &Target.mips.cpu.octeon },
                 .{ "MIPS I6400", &Target.mips.cpu.i6400 },
@@ -319,7 +319,6 @@ const mips = struct {
                 .{ "mips32r5", &Target.mips.cpu.mips32r5 },
                 .{ "mips32r2", &Target.mips.cpu.mips32r2 },
                 .{ "mips32r1", &Target.mips.cpu.mips32 },
-                .{ "mips5", &Target.mips.cpu.mips5 },
                 .{ "mips4", &Target.mips.cpu.mips4 },
                 .{ "mips3", &Target.mips.cpu.mips3 },
                 .{ "mips2", &Target.mips.cpu.mips2 },
@@ -365,7 +364,7 @@ const mips = struct {
     };
 
     test cpuinfo {
-        try testParser(cpuinfo.Parser, .mips64, &Target.mips.cpu.@"octeon+",
+        try testParser(cpuinfo.Parser, .mips64, &Target.mips.cpu.octeon3,
             \\system type             : UBNT_E300
             \\machine                 : Unknown
             \\processor               : 0
@@ -448,7 +447,7 @@ const powerpc = struct {
                 .{ "e300c3", &Target.powerpc.cpu.@"603e" },
                 .{ "e300c4", &Target.powerpc.cpu.@"603e" },
                 .{ "e500mc", &Target.powerpc.cpu.e500mc },
-                .{ "e500v2", &Target.powerpc.cpu.e500v2 },
+                .{ "e500v2", &Target.powerpc.cpu.e500 },
                 .{ "e500", &Target.powerpc.cpu.e500 },
                 .{ "e5500", &Target.powerpc.cpu.e5500 },
                 .{ "e6500", &Target.powerpc.cpu.e6500 },
@@ -722,13 +721,13 @@ const riscv = struct {
                     setFeature(&cpu, .zicbop, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_0.EXT_ZICBOP));
                     setFeature(&cpu, .zilsd, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_0.EXT_ZILSD));
                     setFeature(&cpu, .zclsd, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_0.EXT_ZCLSD));
-                    setFeature(&cpu, .experimental_zicfilp, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_0.EXT_ZICFILP));
+                    // setFeature(&cpu, .experimental_zicfilp, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_0.EXT_ZICFILP));
                 },
                 RISCV_HWPROBE.KEY.MISALIGNED_SCALAR_PERF => {
-                    setFeature(&cpu, .unaligned_scalar_mem, value == RISCV_HWPROBE.MISALIGNED_SCALAR.FAST);
+                    setFeature(&cpu, .unaligned_access, value == RISCV_HWPROBE.MISALIGNED_SCALAR.FAST);
                 },
                 RISCV_HWPROBE.KEY.MISALIGNED_VECTOR_PERF => {
-                    setFeature(&cpu, .unaligned_vector_mem, value == RISCV_HWPROBE.MISALIGNED_VECTOR.FAST);
+                    setFeature(&cpu, .unaligned_vector_access, value == RISCV_HWPROBE.MISALIGNED_VECTOR.FAST);
                 },
                 RISCV_HWPROBE.KEY.VENDOR_EXT_MIPS_0 => {
                     setFeature(&cpu, .xmipsexectl, ima_support and set(value, RISCV_HWPROBE.MIPS_VENDOR_EXT_XMIPSEXECTL));
@@ -740,7 +739,7 @@ const riscv = struct {
                     setFeature(&cpu, .xsfvfwmaccqqq, ima_support and set(value, RISCV_HWPROBE.SIFIVE_VENDOR_EXT.XSFVFWMACCQQQ));
                 },
                 RISCV_HWPROBE.KEY.IMA_EXT_1 => {
-                    setFeature(&cpu, .experimental_zicfiss, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_1_EXT_ZICFISS));
+                    // setFeature(&cpu, .experimental_zicfiss, ima_support and set(value, RISCV_HWPROBE.IMA_EXT_1_EXT_ZICFISS));
                 },
                 else => unreachable,
             }
@@ -928,7 +927,25 @@ pub fn detectNativeCpuAndFeatures(io: Io) ?Target.Cpu {
         .arm, .armeb, .thumb, .thumbeb => arm.detectNativeCpu(io, current_arch),
         .csky => csky.detectNativeCpu(io, current_arch),
         .m68k => m68k.detectNativeCpu(io, current_arch),
-        .mips, .mipsel, .mips64, .mips64el => mips.detectNativeCpu(io, current_arch),
+        .mips,
+        .mipsel,
+        .mipsf32,
+        .mipsf32el,
+        .mipsf64,
+        .mipsf64el,
+        .mipsf64n8,
+        .mipsf64n8el,
+        .mipsn8,
+        .mipsn8el,
+        .mipsr6,
+        .mipsr6el,
+        .mips64,
+        .mips64el,
+        .mips64n8,
+        .mips64n8el,
+        .mips64r6,
+        .mips64r6el,
+        => mips.detectNativeCpu(io, current_arch),
         .powerpc, .powerpcle, .powerpc64, .powerpc64le => powerpc.detectNativeCpu(io, current_arch),
         .riscv64, .riscv32 => riscv.detectNativeCpuAndFeatures(io, current_arch),
         .s390x => s390x.detectNativeCpu(io, current_arch),

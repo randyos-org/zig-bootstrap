@@ -474,7 +474,7 @@ fn addPackageOptionFromArg(
         },
         std.zig.BuildId => return if (maybe_value) |v| {
             map.putAssumeCapacity(field_name, .{
-                .scalar = std.fmt.allocPrint(arena, "{f}", .{v}) catch @panic("OOM"),
+                .scalar = arena.print("{f}", .{v}) catch @panic("OOM"),
             });
         },
         LazyPath => return if (maybe_value) |v| {
@@ -504,12 +504,12 @@ fn addPackageOptionFromArg(
             },
             .comptime_int, .int => return if (maybe_value) |v| {
                 map.putAssumeCapacity(field_name, .{
-                    .scalar = std.fmt.allocPrint(arena, "{d}", .{v}) catch @panic("OOM"),
+                    .scalar = arena.print("{d}", .{v}) catch @panic("OOM"),
                 });
             },
             .comptime_float, .float => return if (maybe_value) |v| {
                 map.putAssumeCapacity(field_name, .{
-                    .scalar = std.fmt.allocPrint(arena, "{x}", .{v}) catch @panic("OOM"),
+                    .scalar = arena.print("{x}", .{v}) catch @panic("OOM"),
                 });
             },
             .pointer => |ptr_info| switch (ptr_info.size) {
@@ -1572,7 +1572,7 @@ pub fn pathResolve(b: *Build, paths: []const []const u8) []u8 {
 pub fn fmt(b: *Build, comptime format: []const u8, args: anytype) []u8 {
     const graph = b.graph;
     const arena = graph.arena;
-    return std.fmt.allocPrint(arena, format, args) catch @panic("OOM");
+    return arena.print(format, args) catch @panic("OOM");
 }
 
 /// Creates an anonymous `Step` that searches for an executable on the host that
@@ -1763,19 +1763,17 @@ pub fn runFallible(b: *Build, argv: []const []const u8, options: RunOptions) Run
     const io = graph.io;
     const arena = graph.arena;
 
-    const print_opts: std.zig.AllocPrintCmdOptions = .{
-        .cwd = switch (options.cwd) {
-            .inherit => null,
-            .path => |p| p,
-            .dir => null, // Unknown without changing function signature of runFallible.
-        },
-        .child_env = options.environ_map,
-        .parent_env = &graph.environ_map,
-    };
-
     if (graph.verbose) {
-        const text = std.zig.allocPrintCmd(arena, argv, print_opts) catch @panic("OOM");
-        std.log.scoped(.verbose).info("{s}", .{text});
+        std.log.scoped(.verbose).info("{f}", .{std.zig.SubprocessCommand{
+            .argv = argv,
+            .cwd = switch (options.cwd) {
+                .inherit => null,
+                .path => |p| p,
+                .dir => null, // Unknown without changing function signature of runFallible.
+            },
+            .child_env = options.environ_map,
+            .parent_env = &graph.environ_map,
+        }});
     }
 
     var child = process.spawn(io, .{
@@ -1813,21 +1811,22 @@ pub fn runFallible(b: *Build, argv: []const []const u8, options: RunOptions) Run
 /// See also:
 /// * `runFallible`.
 pub fn run(b: *Build, argv: []const []const u8) []u8 {
-    const graph = b.graph;
-    const arena = graph.arena;
     switch (b.runFallible(argv, .{
         .stderr_behavior = .inherit,
     })) {
         .success => |stdout| return stdout,
-        .spawn_failed => |err| fatal("the following command failed with {t}:\n{s}", .{
-            err, std.zig.allocPrintCmd(arena, argv, .{}) catch @panic("OOM"),
-        }),
-        .bad_exit_code => |code| fatal("the following command exited with code {d}:\n{s}", .{
-            code, std.zig.allocPrintCmd(arena, argv, .{}) catch @panic("OOM"),
-        }),
-        .crashed => fatal("the following command crashed:\n{s}", .{
-            std.zig.allocPrintCmd(arena, argv, .{}) catch @panic("OOM"),
-        }),
+        .spawn_failed => |err| fatal(
+            "the following command failed with {t}:\n{f}",
+            .{ err, std.zig.SubprocessCommand{ .argv = argv } },
+        ),
+        .bad_exit_code => |code| fatal(
+            "the following command exited with code {d}:\n{f}",
+            .{ code, std.zig.SubprocessCommand{ .argv = argv } },
+        ),
+        .crashed => fatal(
+            "the following command crashed:\n{f}",
+            .{std.zig.SubprocessCommand{ .argv = argv }},
+        ),
     }
 }
 
@@ -1867,6 +1866,9 @@ pub const Dependency = struct {
             }
         }
         return found orelse {
+            if (d.builder.graph.unlazy_deps.count() != 0) {
+                d.builder.serializeConfigurationExiting();
+            }
             for (d.builder.install_tls.step.dependencies.items) |dep_step| {
                 const inst = dep_step.cast(Step.InstallArtifact) orelse continue;
                 log.info("available artifact: {q}", .{inst.artifact.name});
@@ -1877,18 +1879,27 @@ pub const Dependency = struct {
 
     pub fn module(d: *Dependency, name: []const u8) *Module {
         return d.builder.modules.get(name) orelse {
+            if (d.builder.graph.unlazy_deps.count() != 0) {
+                d.builder.serializeConfigurationExiting();
+            }
             panic("unable to find module {q}", .{name});
         };
     }
 
     pub fn namedWriteFiles(d: *Dependency, name: []const u8) *Step.WriteFile {
         return d.builder.named_writefiles.get(name) orelse {
+            if (d.builder.graph.unlazy_deps.count() != 0) {
+                d.builder.serializeConfigurationExiting();
+            }
             panic("unable to find named writefiles {q}", .{name});
         };
     }
 
     pub fn namedLazyPath(d: *Dependency, name: []const u8) LazyPath {
         return d.builder.named_lazy_paths.get(name) orelse {
+            if (d.builder.graph.unlazy_deps.count() != 0) {
+                d.builder.serializeConfigurationExiting();
+            }
             panic("unable to find named lazypath {q}", .{name});
         };
     }
@@ -1959,6 +1970,8 @@ pub fn lazyDependency(b: *Build, name: []const u8, args: anytype) ?*Dependency {
 /// * `dependencyStep`
 pub fn declareDependency(b: *Build, name: []const u8) void {
     const pkg_hash = findPkgHashOrFatal(b, name);
+    const entry = package_map.get(pkg_hash).?;
+    if (entry.available) return;
     markNeededLazyDep(b, pkg_hash);
 }
 
@@ -1972,6 +1985,8 @@ pub fn declareDependency(b: *Build, name: []const u8) void {
 pub fn declareDependencyStep(b: *Build, s: *Step, name: []const u8) void {
     const graph = b.graph;
     const pkg_hash = findPkgHashOrFatal(b, name);
+    const entry = package_map.get(pkg_hash).?;
+    if (entry.available) return;
     const interned_hash = graph.wip_configuration.addString(pkg_hash) catch @panic("OOM");
     s.unlazy_deps.put(graph.arena, interned_hash, {}) catch @panic("OOM");
 }
@@ -2596,8 +2611,7 @@ pub fn resolveTargetQuery(b: *Build, query: Target.Query) ResolvedTarget {
     const io = b.graph.io;
     return .{
         .query = query,
-        .result = std.zig.system.resolveTargetQuery(io, query) catch
-            @panic("unable to resolve target query"),
+        .result = std.zig.resolveTargetQueryOrFatal(io, b.allocator, query),
     };
 }
 
@@ -2643,9 +2657,11 @@ pub fn systemIntegrationOption(
 
 /// Indicates that the build.zig logic depends on a particular file's contents.
 ///
-/// If the file is created, deleted, or has its contents changed, the configure
-/// phase will be repeated. If the inode or mtime change, but the file contents
-/// remain the same, it will not cause the configure logic to be repeated.
+/// The file must exist when this function is called.
+///
+/// If the file is deleted, or has its contents changed, the configure phase
+/// will be repeated. If the inode or mtime change, but the file contents remain
+/// the same, it will not cause the configure logic to be repeated.
 ///
 /// This is an alternative to `Graph.poisonCache` that avoids making every invocation
 /// of `zig build` into a cache miss.
@@ -2694,6 +2710,8 @@ pub fn dependOnFileMetadata(b: *Build, lazy_path: LazyPath) void {
 }
 
 /// Indicates that the build.zig logic depends on a particular directory's entries.
+///
+/// The directory must exist when this function is called.
 ///
 /// This is an alternative to `Graph.poisonCache` that avoids making every invocation
 /// of `zig build` into a cache miss.

@@ -12,7 +12,7 @@ const Allocator = std.mem.Allocator;
 
 handle: Handle,
 
-pub const Handle = std.posix.fd_t;
+pub const Handle = File.Handle;
 
 pub const path = std.fs.path;
 
@@ -52,9 +52,7 @@ pub const max_path_bytes = switch (native_os) {
 /// On WASI, file name components are encoded as valid UTF-8.
 /// On other platforms, `[]u8` components are an opaque sequence of bytes with no particular encoding.
 pub const max_name_bytes = switch (native_os) {
-    .linux, .driverkit, .ios, .maccatalyst, .macos, .tvos, .visionos, .watchos, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos, .serenity, .psp => std.posix.NAME_MAX,
-    // Haiku's NAME_MAX includes the null terminator, so subtract one.
-    .haiku => std.posix.NAME_MAX - 1,
+    .haiku, .linux, .driverkit, .ios, .maccatalyst, .macos, .tvos, .visionos, .watchos, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos, .serenity, .psp => std.posix.NAME_MAX,
     // Each WTF-16LE character may be expanded to 3 WTF-8 bytes.
     // If it would require 4 WTF-8 bytes, then there would be a surrogate
     // pair in the WTF-16LE, and we (over)account 3 bytes for it that way.
@@ -117,6 +115,7 @@ pub const Reader = struct {
         .wasi => @sizeOf(std.os.wasi.dirent_t) +
             std.mem.alignForward(usize, max_name_bytes, @alignOf(std.os.wasi.dirent_t)),
         .openbsd => std.c.S.BLKSIZE,
+        .haiku => @offsetOf(std.c.DirEnt, "name") + max_name_bytes + 1,
         else => if (builtin.link_libc) @sizeOf(std.c.dirent) else std.mem.alignForward(usize, max_name_bytes, @alignOf(usize)),
     };
 
@@ -295,8 +294,13 @@ pub const SelectiveWalker = struct {
         });
     }
 
-    pub fn deinit(self: *SelectiveWalker) void {
+    pub fn deinit(self: *SelectiveWalker, io: Io) void {
         self.name_buffer.deinit(self.allocator);
+        if (self.stack.items.len > 1) {
+            for (self.stack.items[1..]) |item| {
+                item.iter.reader.dir.close(io);
+            }
+        }
         self.stack.deinit(self.allocator);
     }
 
@@ -370,8 +374,8 @@ pub const Walker = struct {
         return entry;
     }
 
-    pub fn deinit(self: *Walker) void {
-        self.inner.deinit();
+    pub fn deinit(self: *Walker, io: Io) void {
+        self.inner.deinit(io);
     }
 
     /// Leaves the current directory, continuing walking one level up.
@@ -422,7 +426,7 @@ pub const AccessError = error{
     ReadOnlyFileSystem,
 } || PathNameError || Io.Cancelable || Io.UnexpectedError;
 
-pub const AccessOptions = packed struct {
+pub const AccessOptions = bitpack struct {
     follow_symlinks: bool = true,
     read: bool = false,
     write: bool = false,

@@ -16,7 +16,7 @@ pub const Id = switch (native_os) {
     else => std.posix.pid_t,
 };
 
-/// After `wait` or `kill` is called, this becomes `null`.
+/// After `wait` succeeds or `kill` is called, this becomes `null`.
 /// On Windows this is the hProcess.
 /// On POSIX this is the pid.
 id: ?Id,
@@ -93,14 +93,21 @@ pub const ResourceUsageStatistics = struct {
 
 pub const Term = union(enum) {
     exited: u8,
-    signal: std.posix.SIG,
-    stopped: std.posix.SIG,
+    signal: Signal,
+    stopped: Signal,
     unknown: u32,
 
-    pub fn success(t: Term) bool {
-        return switch (t) {
-            .exited => |code| code == 0,
-            else => false,
+    // This probably needs some more thought for Windows.
+    const Signal = if (native_os == .windows) std.c.SIG else std.posix.SIG;
+
+    pub const success: Term = .{ .exited = 0 };
+
+    pub fn eql(lhs: Term, rhs: Term) bool {
+        return switch (lhs) {
+            .exited => |lhs_exited| rhs == .exited and lhs_exited == rhs.exited,
+            .signal => |lhs_signal| rhs == .signal and lhs_signal == rhs.signal,
+            .stopped => |lhs_stopped| rhs == .stopped and lhs_stopped == rhs.stopped,
+            .unknown => |lhs_unknown| rhs == .unknown and lhs_unknown == rhs.unknown,
         };
     }
 
@@ -128,7 +135,7 @@ pub const Cwd = union(enum) {
 /// Requests for the operating system to forcibly terminate the child process,
 /// then blocks until it terminates, then cleans up all resources.
 ///
-/// Idempotent and does nothing after `wait` returns.
+/// Idempotent, and does nothing if `wait` previously cleaned up all resources.
 ///
 /// Uncancelable. Ignores unexpected errors from the operating system.
 pub fn kill(child: *Child, io: Io) void {
@@ -142,11 +149,12 @@ pub fn kill(child: *Child, io: Io) void {
     assert(child.id == null);
 }
 
-pub const WaitError = error{
-    AccessDenied,
-} || Io.Cancelable || Io.UnexpectedError;
+pub const WaitError = Io.Cancelable || Io.UnexpectedError;
 
-/// Blocks until child process terminates and then cleans up all resources.
+/// Blocks until child process terminates.
+/// Cleans up all resources if the child process terminates.
+/// To ensure the child process terminates and resources are cleaned
+/// up in all cases, `kill` should be called after `wait`.
 pub fn wait(child: *Child, io: Io) WaitError!Term {
     assert(child.id != null);
     return io.vtable.childWait(io.userdata, child);
