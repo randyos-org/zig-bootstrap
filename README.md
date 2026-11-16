@@ -188,7 +188,7 @@ is more portable across Linux distributions.
 | `riscv32-netbsd-none`    | OK     |
 | `riscv64-netbsd-none`    | OK     |
 | `sparc-netbsd-none`      | [#230](https://codeberg.org/ziglang/zig-bootstrap/issues/230) |
-| `sparc64-netbsd-none`    | [#231](https://codeberg.org/ziglang/zig-bootstrap/issues/231) |
+| `sparc64-netbsd-none`    | OK     |
 | `x86-netbsd-none`        | OK     |
 | `x86_64-netbsd-none`     | OK     |
 
