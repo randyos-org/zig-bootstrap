@@ -95,7 +95,7 @@ is more portable across Linux distributions.
 | Target                     | Status |
 |----------------------------|--------|
 | `aarch64-freebsd-none`     | OK     |
-| `arm-freebsd-eabihf`       | OK     |
+| `arm-freebsd-none`         | OK     |
 | `powerpc64-freebsd-none`   | OK     |
 | `powerpc64le-freebsd-none` | OK     |
 | `riscv64-freebsd-none`     | OK     |
@@ -109,37 +109,37 @@ is more portable across Linux distributions.
 | `aarch64-linux-musl`        | OK     |
 | `aarch64_be-linux-gnu`      | OK     |
 | `aarch64_be-linux-musl`     | OK     |
-| `arm-linux-gnueabi`         | OK     |
-| `arm-linux-gnueabihf`       | OK     |
-| `arm-linux-musleabi`        | OK     |
-| `arm-linux-musleabihf`      | OK     |
-| `armeb-linux-gnueabi`       | OK     |
-| `armeb-linux-gnueabihf`     | OK     |
-| `armeb-linux-musleabi`      | OK     |
-| `armeb-linux-musleabihf`    | OK     |
+| `arm-linux-gnu`             | OK     |
+| `arm-linux-gnusf`           | OK     |
+| `arm-linux-musl`            | OK     |
+| `arm-linux-muslsf`          | OK     |
+| `armeb-linux-gnu`           | OK     |
+| `armeb-linux-gnusf`         | OK     |
+| `armeb-linux-musl`          | OK     |
+| `armeb-linux-muslsf`        | OK     |
 | `hexagon-linux-musl`        | OK     |
 | `loongarch64-linux-gnu`     | OK     |
 | `loongarch64-linux-gnusf`   | OK     |
 | `loongarch64-linux-musl`    | OK     |
 | `loongarch64-linux-muslsf`  | OK     |
-| `mips-linux-gnueabi`        | OK     |
-| `mips-linux-gnueabihf`      | OK     |
-| `mips-linux-musleabi`       | OK     |
-| `mips-linux-musleabihf`     | OK     |
-| `mips64-linux-gnuabi64`     | OK     |
-| `mips64-linux-gnuabin32`    | OK     |
-| `mips64-linux-muslabi64`    | OK     |
-| `mips64-linux-muslabin32`   | OK     |
-| `mips64el-linux-gnuabi64`   | OK     |
-| `mips64el-linux-gnuabin32`  | OK     |
-| `mips64el-linux-muslabi64`  | OK     |
-| `mips64el-linux-muslabin32` | OK     |
-| `mipsel-linux-gnueabi`      | OK     |
-| `mipsel-linux-gnueabihf`    | OK     |
-| `mipsel-linux-musleabi`     | OK     |
-| `mipsel-linux-musleabihf`   | OK     |
-| `powerpc-linux-musleabi`    | OK     |
-| `powerpc-linux-musleabihf`  | OK     |
+| `mips-linux-gnu`            | OK     |
+| `mips-linux-gnusf`          | OK     |
+| `mips-linux-musl`           | OK     |
+| `mips-linux-muslsf`         | OK     |
+| `mipsel-linux-gnu`          | OK     |
+| `mipsel-linux-gnusf`        | OK     |
+| `mipsel-linux-musl`         | OK     |
+| `mipsel-linux-muslsf`       | OK     |
+| `mips64-linux-gnu`          | OK     |
+| `mips64-linux-gnun32`       | OK     |
+| `mips64-linux-musl`         | OK     |
+| `mips64-linux-musln32`      | OK     |
+| `mips64el-linux-gnu`        | OK     |
+| `mips64el-linux-gnun32`     | OK     |
+| `mips64el-linux-musl`       | OK     |
+| `mips64el-linux-musln32`    | OK     |
+| `powerpc-linux-musl`        | OK     |
+| `powerpc-linux-muslsf`      | OK     |
 | `powerpc64-linux-musl`      | OK     |
 | `powerpc64le-linux-gnu`     | OK     |
 | `powerpc64le-linux-musl`    | OK     |
@@ -151,10 +151,10 @@ is more portable across Linux distributions.
 | `s390x-linux-musl`          | OK     |
 | `sparc-linux-gnu`           | [#117](https://codeberg.org/ziglang/zig-bootstrap/issues/117) |
 | `sparc64-linux-gnu`         | OK     |
-| `thumb-linux-musleabi`      | OK     |
-| `thumb-linux-musleabihf`    | OK     |
-| `thumbeb-linux-musleabi`    | OK     |
-| `thumbeb-linux-musleabihf`  | OK     |
+| `thumb-linux-musl`          | OK     |
+| `thumb-linux-muslsf`        | OK     |
+| `thumbeb-linux-musl`        | OK     |
+| `thumbeb-linux-muslsf`      | OK     |
 | `x86-linux-gnu`             | OK     |
 | `x86-linux-musl`            | OK     |
 | `x86_64-linux-gnu`          | OK     |
@@ -175,16 +175,16 @@ is more portable across Linux distributions.
 |--------------------------|--------|
 | `aarch64-netbsd-none`    | OK     |
 | `aarch64_be-netbsd-none` | OK     |
-| `arm-netbsd-eabi`        | OK     |
-| `arm-netbsd-eabihf`      | OK     |
-| `armeb-netbsd-eabi`      | OK     |
-| `armeb-netbsd-eabihf`    | OK     |
-| `mips-netbsd-eabi`       | OK     |
-| `mips-netbsd-eabihf`     | OK     |
-| `mipsel-netbsd-eabi`     | OK     |
-| `mipsel-netbsd-eabihf`   | OK     |
-| `powerpc-netbsd-eabi`    | OK     |
-| `powerpc-netbsd-eabihf`  | OK     |
+| `arm-netbsd-none`        | OK     |
+| `arm-netbsd-sf`          | OK     |
+| `armeb-netbsd-none`      | OK     |
+| `armeb-netbsd-sf`        | OK     |
+| `mips-netbsd-none`       | OK     |
+| `mips-netbsd-sf`         | OK     |
+| `mipsel-netbsd-none`     | OK     |
+| `mipsel-netbsd-sf`       | OK     |
+| `powerpc-netbsd-none`    | OK     |
+| `powerpc-netbsd-sf`      | OK     |
 | `riscv32-netbsd-none`    | OK     |
 | `riscv64-netbsd-none`    | OK     |
 | `sparc-netbsd-none`      | [#230](https://codeberg.org/ziglang/zig-bootstrap/issues/230) |
@@ -194,18 +194,17 @@ is more portable across Linux distributions.
 
 #### OpenBSD
 
-| Target                    | Status |
-|---------------------------|--------|
-| `aarch64-openbsd-none`    | OK     |
-| `arm-openbsd-eabi`        | OK     |
-| `mips64-openbsd-none`     | OK     |
-| `mips64el-openbsd-none`   | OK     |
-| `powerpc-openbsd-eabihf`  | OK     |
-| `powerpc64-openbsd-none`  | OK     |
-| `riscv64-openbsd-none`    | OK     |
-| `sparc64-openbsd-none`    | OK     |
-| `x86-openbsd-none`        | OK     |
-| `x86_64-openbsd-none`     | OK     |
+| Target                   | Status |
+|--------------------------|--------|
+| `aarch64-openbsd-none`   | OK     |
+| `arm-openbsd-sf`         | OK     |
+| `mips64-openbsd-none`    | OK     |
+| `powerpc-openbsd-none`   | OK     |
+| `powerpc64-openbsd-none` | OK     |
+| `riscv64-openbsd-none`   | OK     |
+| `sparc64-openbsd-none`   | OK     |
+| `x86-openbsd-none`       | OK     |
+| `x86_64-openbsd-none`    | OK     |
 
 #### Windows
 
