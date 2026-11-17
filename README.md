@@ -107,8 +107,8 @@ is more portable across Linux distributions.
 |------------------------------|--------|
 | `aarch64-linux-gnu`          | OK     |
 | `aarch64-linux-musl`         | OK     |
-| `aarch64_be-linux-gnu`       | OK     |
-| `aarch64_be-linux-musl`      | OK     |
+| `aarch64be-linux-gnu`        | OK     |
+| `aarch64be-linux-musl`       | OK     |
 | `arm-linux-gnu`              | OK     |
 | `arm-linux-gnusf`            | OK     |
 | `arm-linux-musl`             | OK     |
@@ -249,7 +249,7 @@ is more portable across Linux distributions.
 | Target                   | Status |
 |--------------------------|--------|
 | `aarch64-netbsd-none`    | OK     |
-| `aarch64_be-netbsd-none` | OK     |
+| `aarch64be-netbsd-none`  | OK     |
 | `arm-netbsd-none`        | OK     |
 | `arm-netbsd-sf`          | OK     |
 | `armeb-netbsd-none`      | OK     |
